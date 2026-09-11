@@ -1,0 +1,187 @@
+/* ===========================================================
+   GhostStackPoker — css/style.css
+   Estilos globais compartilhados por TODAS as páginas.
+   O Tailwind (via CDN) cuida das classes utilitárias (flex, px-4 etc);
+   aqui ficam só os estilos "sob medida" que o Tailwind não tem pronto.
+   =========================================================== */
+
+/* ===== Variáveis de tema (paleta oficial do GhostStackPoker) ===== */
+:root{
+  --felt: #0F3D2E;
+  --felt-dark: #0A2C21;
+  --felt-light: #155A42;
+  --burgundy: #7A2331;
+  --gold: #C9A227;
+  --gold-light: #E4C558;
+  --cream: #F1E9D8;
+  --ink: #151515;
+}
+
+html, body{
+  background: var(--felt-dark);
+  font-family: 'Inter', sans-serif;
+}
+
+.font-display{ font-family: 'Fraunces', serif; }
+
+/* ===== App Frame: centraliza tudo como um "app mobile" mesmo em telas grandes ===== */
+.app-frame{
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--felt);
+  position: relative;
+  box-shadow: 0 0 60px rgba(0,0,0,0.5);
+}
+
+/* Textura sutil de feltro (ruído leve via gradientes repetidos) */
+.felt-texture{
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 60%, rgba(255,255,255,0.025) 0%, transparent 45%),
+    linear-gradient(var(--felt), var(--felt));
+}
+
+/* Trilho dourado (borda tipo mesa de cassino) */
+.table-rail{
+  border: 2px solid rgba(201, 162, 39, 0.35);
+  border-radius: 22px;
+  box-shadow: inset 0 0 0 1px rgba(201,162,39,0.15), 0 8px 24px rgba(0,0,0,0.35);
+}
+
+/* ===== FICHAS (chips) ===== */
+.chip-wrap{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip-count{
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--cream);
+  background: rgba(0,0,0,0.35);
+  padding: 2px 8px;
+  border-radius: 999px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.chip{
+  --chip-color: #222;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  position: relative;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.35) 0%, transparent 35%),
+    var(--chip-color);
+  box-shadow:
+    0 0 0 3px rgba(255,255,255,0.85),
+    0 0 0 5px var(--chip-color),
+    0 0 0 7px rgba(255,255,255,0.5),
+    0 6px 10px rgba(0,0,0,0.45);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.chip:active{ transform: translateY(2px) scale(0.96); }
+
+.chip:disabled{
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.chip-value{
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 17px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+/* Cores oficiais das fichas */
+.chip-preta   { --chip-color: #1C1C1C; }
+.chip-azul    { --chip-color: #1E5FA8; }
+.chip-vermelha{ --chip-color: #B3242C; }
+.chip-verde   { --chip-color: #1E8449; }
+.chip-branca  { --chip-color: #E9E4D8; }
+.chip-branca .chip-value{ color: #151515; text-shadow: none; }
+.chip-amarela { --chip-color: #E0B400; }
+.chip-amarela .chip-value{ color: #151515; text-shadow: none; }
+
+/* ===== Cartões de jogador (placar) ===== */
+.player-card{
+  background: rgba(0,0,0,0.28);
+  border: 1px solid rgba(201,162,39,0.2);
+  border-radius: 14px;
+}
+
+.player-card.is-turn{
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-light) inset;
+}
+
+.player-card.is-folded{ opacity: 0.45; }
+
+/* ===== Scrollbar discreta ===== */
+::-webkit-scrollbar{ width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb{ background: rgba(201,162,39,0.4); border-radius: 10px; }
+
+/* ===== Botão de Regras: fixo, canto superior direito, sempre acima do dock ===== */
+.rules-fab{
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  background: var(--gold);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 18px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  z-index: 30; /* acima do dock (20), abaixo do modal (50) */
+  border: none;
+}
+
+/* Dock inferior fixo (painel de ação / fichas): fica na Tela da Mesa */
+#player-dock{ z-index: 20; }
+
+/* ===== Painel de Ação (Call / Raise / All-in / Fold) ===== */
+.action-btn{
+  border-radius: 12px;
+  padding: 12px 10px;
+  text-align: center;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+.action-btn:active{ transform: scale(0.97); }
+.action-btn:disabled{
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ===== Modal (usado no modal de regras) ===== */
+.modal-backdrop{
+  background: rgba(10, 20, 15, 0.75);
+  backdrop-filter: blur(2px);
+}
+
+.rank-badge{
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  color: var(--gold);
+  min-width: 28px;
+}

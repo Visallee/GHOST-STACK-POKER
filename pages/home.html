@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>GhostStackPoker — Entrar</title>
+
+<!-- Google Fonts: Fraunces (títulos) + Inter (textos/botões) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Tailwind via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          felt: { DEFAULT: '#0F3D2E', dark: '#0A2C21', light: '#155A42' },
+          burgundy: '#7A2331',
+          gold: { DEFAULT: '#C9A227', light: '#E4C558' },
+          cream: '#F1E9D8',
+          ink: '#151515'
+        },
+        fontFamily: {
+          display: ['Fraunces', 'serif'],
+          body: ['Inter', 'sans-serif']
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Estilos globais do projeto -->
+<link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body class="felt-texture">
+
+<div class="app-frame felt-texture">
+
+  <!-- ======================================================= -->
+  <!-- TELA 1: LOBBY (Criar / Entrar)                           -->
+  <!-- ======================================================= -->
+  <section id="screen-home" class="min-h-screen flex flex-col justify-center px-6 py-10">
+
+    <div class="text-center mb-10">
+      <p class="text-gold tracking-wide text-sm font-body mb-1">Poker entre amigos</p>
+      <h1 class="font-display text-cream text-4xl leading-tight">GhostStack<br>Poker</h1>
+    </div>
+
+    <!-- Card: Criar Sala -->
+    <div class="table-rail bg-black/20 p-5 mb-5">
+      <h2 class="font-display text-cream text-xl mb-4">Criar sala</h2>
+
+      <label class="block text-cream/70 text-xs font-body mb-1" for="input-create-name">Seu nome</label>
+      <input id="input-create-name" type="text" placeholder="Ex: Carlos"
+        class="w-full bg-black/30 text-cream placeholder-cream/30 border border-gold/25 rounded-lg px-4 py-3 mb-4 font-body outline-none focus:border-gold">
+
+      <button id="btn-create-room"
+        class="w-full bg-gold hover:bg-gold-light text-ink font-body font-semibold py-3 rounded-lg transition-colors">
+        Criar sala
+      </button>
+    </div>
+
+    <!-- Divisor -->
+    <div class="flex items-center gap-3 my-2">
+      <div class="h-px flex-1 bg-gold/20"></div>
+      <span class="text-cream/40 text-xs font-body">ou</span>
+      <div class="h-px flex-1 bg-gold/20"></div>
+    </div>
+
+    <!-- Card: Entrar em Sala -->
+    <div class="table-rail bg-black/20 p-5 mt-5">
+      <h2 class="font-display text-cream text-xl mb-4">Entrar em uma sala</h2>
+
+      <label class="block text-cream/70 text-xs font-body mb-1" for="input-join-name">Seu nome</label>
+      <input id="input-join-name" type="text" placeholder="Ex: Ana"
+        class="w-full bg-black/30 text-cream placeholder-cream/30 border border-gold/25 rounded-lg px-4 py-3 mb-4 font-body outline-none focus:border-gold">
+
+      <label class="block text-cream/70 text-xs font-body mb-1" for="input-join-code">Código da sala</label>
+      <input id="input-join-code" type="text" placeholder="Ex: A1B2C3" maxlength="6"
+        class="w-full bg-black/30 text-cream placeholder-cream/30 border border-gold/25 rounded-lg px-4 py-3 mb-4 font-body outline-none focus:border-gold uppercase tracking-widest text-center">
+
+      <button id="btn-join-room"
+        class="w-full bg-transparent border border-gold text-gold hover:bg-gold hover:text-ink font-body font-semibold py-3 rounded-lg transition-colors">
+        Entrar na sala
+      </button>
+    </div>
+
+    <p id="home-error" class="text-burgundy text-sm text-center mt-4 font-body hidden"></p>
+  </section>
+
+</div>
+
+<!-- SDK do Supabase (precisa vir ANTES dos nossos módulos, que usam window.supabase) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<!-- Nosso código (type="module" permite usar import/export entre arquivos) -->
+<script type="module" src="../js/home.js"></script>
+
+</body>
+</html>

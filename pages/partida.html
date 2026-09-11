@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>GhostStackPoker — Mesa</title>
+
+<!-- Google Fonts: Fraunces (títulos) + Inter (textos/botões) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Tailwind via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          felt: { DEFAULT: '#0F3D2E', dark: '#0A2C21', light: '#155A42' },
+          burgundy: '#7A2331',
+          gold: { DEFAULT: '#C9A227', light: '#E4C558' },
+          cream: '#F1E9D8',
+          ink: '#151515'
+        },
+        fontFamily: {
+          display: ['Fraunces', 'serif'],
+          body: ['Inter', 'sans-serif']
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Estilos globais do projeto -->
+<link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body class="felt-texture">
+
+<div class="app-frame felt-texture">
+
+  <!-- ======================================================= -->
+  <!-- TELA 2: MESA — Cabeçalho + Placar                        -->
+  <!-- ======================================================= -->
+  <section id="screen-table" class="min-h-screen flex flex-col pb-40">
+
+    <!-- Topo: código da sala + pote -->
+    <header class="flex items-center justify-between px-5 pt-6 pb-4">
+      <div>
+        <p class="text-cream/50 text-[11px] font-body">Sala</p>
+        <p id="room-code-display" class="font-display text-cream text-lg tracking-widest">------</p>
+        <a id="link-leave-room" href="home.html" class="text-cream/30 text-[10px] font-body underline">sair da sala</a>
+      </div>
+
+      <div class="text-center">
+        <p class="text-cream/50 text-[11px] font-body">Pote</p>
+        <p id="pot-total" class="font-display text-gold text-3xl leading-none">0</p>
+      </div>
+
+      <!-- espaço reservado à direita pra não ficar embaixo do FAB de regras -->
+      <div class="w-10"></div>
+    </header>
+
+    <!-- Ações do dono da sala (ante) -->
+    <div class="px-5 mb-4">
+      <button id="btn-force-ante"
+        class="hidden w-full bg-burgundy/80 hover:bg-burgundy text-cream font-body font-semibold text-sm py-2.5 rounded-lg">
+        Cobrar Ante (5 de todos)
+      </button>
+    </div>
+
+    <!-- Placar de jogadores -->
+    <div class="px-5">
+      <h3 class="text-cream/60 text-xs font-body mb-2 tracking-wide">Jogadores na mesa</h3>
+      <div id="players-list" class="flex flex-col gap-2 max-h-[34vh] overflow-y-auto pr-1">
+        <!-- Preenchido dinamicamente por js/partida.js (renderLeaderboard) -->
+      </div>
+    </div>
+
+    <!-- Selecionar vencedor do pote -->
+    <div class="px-5 mt-5">
+      <label class="block text-cream/60 text-xs font-body mb-1" for="select-winner">Vencedor da rodada</label>
+      <div class="flex gap-2">
+        <select id="select-winner"
+          class="flex-1 bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2.5 font-body outline-none focus:border-gold">
+          <option value="">Selecionar jogador...</option>
+        </select>
+        <button id="btn-give-pot"
+          class="bg-gold text-ink font-body font-semibold px-4 rounded-lg text-sm whitespace-nowrap">
+          Entregar pote
+        </button>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ======================================================= -->
+  <!-- ÁREA DE AÇÃO (fixa embaixo): 4 botões OU fichas visuais  -->
+  <!-- ======================================================= -->
+  <div id="player-dock" class="fixed bottom-0 left-0 right-0">
+    <div class="app-frame !min-h-0 !shadow-none">
+      <div class="table-rail bg-felt-dark/95 m-3 mt-0 p-4">
+
+        <!-- ===== PAINEL A: 4 botões de ação (estado padrão) ===== -->
+        <div id="panel-actions" class="flex flex-col gap-3">
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-cream/50 text-[11px] font-body">Suas fichas</p>
+              <p id="my-stack-display" class="font-display text-cream text-2xl leading-none">1000</p>
+            </div>
+            <div class="text-right">
+              <p class="text-cream/50 text-[11px] font-body">Maior aposta na mesa</p>
+              <p id="table-max-bet-display" class="font-display text-gold text-xl leading-none">0</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-action-call" class="action-btn bg-felt-light border border-gold/40 text-cream">
+              <span class="block font-body font-semibold text-sm">Cobrir Aposta</span>
+              <span id="call-amount-label" class="block text-gold text-xs font-body mt-0.5">0</span>
+            </button>
+
+            <button id="btn-action-raise" class="action-btn bg-felt-light border border-gold/40 text-cream">
+              <span class="block font-body font-semibold text-sm">Aumentar Aposta</span>
+              <span class="block text-cream/50 text-xs font-body mt-0.5">montar valor</span>
+            </button>
+
+            <button id="btn-action-allin" class="action-btn bg-burgundy/85 border border-burgundy text-cream">
+              <span class="block font-body font-semibold text-sm">All-in</span>
+              <span id="allin-amount-label" class="block text-cream/70 text-xs font-body mt-0.5">0</span>
+            </button>
+
+            <button id="btn-action-fold" class="action-btn bg-transparent border border-cream/25 text-cream/80">
+              <span class="block font-body font-semibold text-sm">Desistir</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ===== PAINEL B: montar valor do aumento com as fichas ===== -->
+        <div id="panel-raise" class="hidden flex-col gap-0">
+
+          <div class="flex items-center justify-between mb-3">
+            <button id="btn-raise-back" class="text-cream/70 font-body text-xs flex items-center gap-1">
+              ← Voltar
+            </button>
+            <div class="text-right">
+              <p class="text-cream/50 text-[11px] font-body">Valor do aumento</p>
+              <p id="current-bet" class="font-display text-cream text-2xl leading-none">0</p>
+            </div>
+          </div>
+
+          <!-- Fichas do jogador -->
+          <div class="grid grid-cols-6 gap-2 justify-items-center mb-3">
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="preta">20</span>
+              <button class="chip chip-preta" data-chip-value="5" data-chip-color="preta">
+                <span class="chip-value">5</span>
+              </button>
+            </div>
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="azul">10</span>
+              <button class="chip chip-azul" data-chip-value="10" data-chip-color="azul">
+                <span class="chip-value">10</span>
+              </button>
+            </div>
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="vermelha">10</span>
+              <button class="chip chip-vermelha" data-chip-value="20" data-chip-color="vermelha">
+                <span class="chip-value">20</span>
+              </button>
+            </div>
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="verde">4</span>
+              <button class="chip chip-verde" data-chip-value="50" data-chip-color="verde">
+                <span class="chip-value">50</span>
+              </button>
+            </div>
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="branca">2</span>
+              <button class="chip chip-branca" data-chip-value="100" data-chip-color="branca">
+                <span class="chip-value">100</span>
+              </button>
+            </div>
+
+            <div class="chip-wrap">
+              <span class="chip-count" data-count-for="amarela">1</span>
+              <button class="chip chip-amarela" data-chip-value="200" data-chip-color="amarela">
+                <span class="chip-value">200</span>
+              </button>
+            </div>
+
+          </div>
+
+          <div class="flex gap-2">
+            <button id="btn-clear-bet"
+              class="flex-1 border border-cream/25 text-cream/80 font-body text-sm font-medium py-2.5 rounded-lg">
+              Limpar
+            </button>
+            <button id="btn-confirm-bet"
+              class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg">
+              Confirmar Aumento
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ======================================================= -->
+  <!-- BOTÃO FLUTUANTE DE REGRAS (fixo, canto sup. direito)     -->
+  <!-- ======================================================= -->
+  <button id="btn-rules-fab" aria-label="Ver combinações de poker" class="rules-fab">
+    ?
+  </button>
+
+
+  <!-- ======================================================= -->
+  <!-- MODAL: Ranking de mãos de poker                          -->
+  <!-- ======================================================= -->
+  <div id="modal-rules" class="hidden fixed inset-0 z-50 items-center justify-center px-4 modal-backdrop">
+    <div class="table-rail bg-felt w-full max-w-sm max-h-[80vh] overflow-y-auto p-5">
+
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display text-cream text-2xl">Combinações</h2>
+        <button id="btn-close-rules" aria-label="Fechar"
+          class="w-8 h-8 rounded-full border border-cream/20 text-cream/70 font-body">✕</button>
+      </div>
+
+      <ol class="flex flex-col gap-3 font-body">
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">1</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Royal Flush</p>
+            <p class="text-cream/50 text-xs">Sequência de A a 10, todas do mesmo naipe.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">2</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Straight Flush</p>
+            <p class="text-cream/50 text-xs">Cinco cartas em sequência, mesmo naipe.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">3</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Quadra</p>
+            <p class="text-cream/50 text-xs">Quatro cartas de mesmo valor.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">4</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Full House</p>
+            <p class="text-cream/50 text-xs">Uma trinca mais um par.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">5</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Flush</p>
+            <p class="text-cream/50 text-xs">Cinco cartas do mesmo naipe, sem sequência.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">6</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Sequência</p>
+            <p class="text-cream/50 text-xs">Cinco cartas em ordem, naipes variados.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">7</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Trinca</p>
+            <p class="text-cream/50 text-xs">Três cartas de mesmo valor.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">8</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Dois Pares</p>
+            <p class="text-cream/50 text-xs">Dois pares diferentes.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">9</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Um Par</p>
+            <p class="text-cream/50 text-xs">Duas cartas de mesmo valor.</p>
+          </div>
+        </li>
+        <li class="flex gap-3 items-start">
+          <span class="rank-badge">10</span>
+          <div>
+            <p class="text-cream font-semibold text-sm">Carta Alta</p>
+            <p class="text-cream/50 text-xs">Nenhuma combinação — vence a carta mais alta.</p>
+          </div>
+        </li>
+      </ol>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- SDK do Supabase (precisa vir ANTES dos nossos módulos, que usam window.supabase) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<!-- Nosso código (type="module" permite usar import/export entre arquivos) -->
+<script type="module" src="../js/partida.js"></script>
+
+</body>
+</html>
