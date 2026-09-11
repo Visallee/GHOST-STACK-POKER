@@ -223,6 +223,49 @@
         border-radius: 10px;
       }
 
+      /* ===== Botão de Regras: fixo, canto superior direito, sempre acima do dock ===== */
+      .rules-fab {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        width: 44px;
+        height: 44px;
+        border-radius: 9999px;
+        background: var(--gold);
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Fraunces", serif;
+        font-weight: 700;
+        font-size: 18px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+        z-index: 30; /* fica acima do dock (20) mas abaixo do modal (50) */
+        border: none;
+      }
+
+      /* Dock inferior fixo: z-index próprio para nunca ficar por baixo de outro elemento */
+      #player-dock {
+        z-index: 20;
+      }
+
+      /* ===== Painel de Ação (Call / Raise / All-in / Fold) ===== */
+      .action-btn {
+        border-radius: 12px;
+        padding: 12px 10px;
+        text-align: center;
+        transition:
+          opacity 0.15s ease,
+          transform 0.1s ease;
+      }
+      .action-btn:active {
+        transform: scale(0.97);
+      }
+      .action-btn:disabled {
+        opacity: 0.35;
+        pointer-events: none;
+      }
+
       /* ===== Modal de regras ===== */
       .modal-backdrop {
         background: rgba(10, 20, 15, 0.75);
@@ -369,13 +412,8 @@
             </p>
           </div>
 
-          <button
-            id="btn-open-rules"
-            aria-label="Ver combinações de poker"
-            class="w-10 h-10 rounded-full border border-gold/40 text-gold flex items-center justify-center font-display text-lg"
-          >
-            ?
-          </button>
+          <!-- espaço reservado à direita pra não ficar embaixo do FAB de regras -->
+          <div class="w-10"></div>
         </header>
 
         <!-- Ações do dono da sala (ante) -->
@@ -482,119 +520,200 @@
       <div id="player-dock" class="hidden fixed bottom-0 left-0 right-0">
         <div class="app-frame !min-h-0 !shadow-none">
           <div class="table-rail bg-felt-dark/95 m-3 mt-0 p-4">
-            <!-- Aposta atual -->
-            <div class="flex items-center justify-between mb-3">
-              <div>
-                <p class="text-cream/50 text-[11px] font-body">Aposta atual</p>
-                <p
-                  id="current-bet"
-                  class="font-display text-cream text-2xl leading-none"
-                >
-                  0
-                </p>
+            <!-- ===== PAINEL A: 4 botões de ação (estado padrão) ===== -->
+            <div id="panel-actions" class="flex flex-col gap-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-cream/50 text-[11px] font-body">Suas fichas</p>
+                  <p
+                    id="my-stack-display"
+                    class="font-display text-cream text-2xl leading-none"
+                  >
+                    1000
+                  </p>
+                </div>
+                <div class="text-right">
+                  <p class="text-cream/50 text-[11px] font-body">
+                    Maior aposta na mesa
+                  </p>
+                  <p
+                    id="table-max-bet-display"
+                    class="font-display text-gold text-xl leading-none"
+                  >
+                    0
+                  </p>
+                </div>
               </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  id="btn-action-call"
+                  class="action-btn bg-felt-light border border-gold/40 text-cream"
+                >
+                  <span class="block font-body font-semibold text-sm"
+                    >Cobrir Aposta</span
+                  >
+                  <span
+                    id="call-amount-label"
+                    class="block text-gold text-xs font-body mt-0.5"
+                    >0</span
+                  >
+                </button>
+
+                <button
+                  id="btn-action-raise"
+                  class="action-btn bg-felt-light border border-gold/40 text-cream"
+                >
+                  <span class="block font-body font-semibold text-sm"
+                    >Aumentar Aposta</span
+                  >
+                  <span class="block text-cream/50 text-xs font-body mt-0.5"
+                    >montar valor</span
+                  >
+                </button>
+
+                <button
+                  id="btn-action-allin"
+                  class="action-btn bg-burgundy/85 border border-burgundy text-cream"
+                >
+                  <span class="block font-body font-semibold text-sm"
+                    >All-in</span
+                  >
+                  <span
+                    id="allin-amount-label"
+                    class="block text-cream/70 text-xs font-body mt-0.5"
+                    >0</span
+                  >
+                </button>
+
+                <button
+                  id="btn-action-fold"
+                  class="action-btn bg-transparent border border-cream/25 text-cream/80"
+                >
+                  <span class="block font-body font-semibold text-sm"
+                    >Desistir</span
+                  >
+                </button>
+              </div>
+            </div>
+
+            <!-- ===== PAINEL B: montar valor do aumento com as fichas ===== -->
+            <div id="panel-raise" class="hidden flex-col gap-0">
+              <div class="flex items-center justify-between mb-3">
+                <button
+                  id="btn-raise-back"
+                  class="text-cream/70 font-body text-xs flex items-center gap-1"
+                >
+                  ← Voltar
+                </button>
+                <div class="text-right">
+                  <p class="text-cream/50 text-[11px] font-body">
+                    Valor do aumento
+                  </p>
+                  <p
+                    id="current-bet"
+                    class="font-display text-cream text-2xl leading-none"
+                  >
+                    0
+                  </p>
+                </div>
+              </div>
+
+              <!-- Fichas do jogador -->
+              <div class="grid grid-cols-6 gap-2 justify-items-center mb-3">
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="preta">20</span>
+                  <button
+                    class="chip chip-preta"
+                    data-chip-value="5"
+                    data-chip-color="preta"
+                  >
+                    <span class="chip-value">5</span>
+                  </button>
+                </div>
+
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="azul">10</span>
+                  <button
+                    class="chip chip-azul"
+                    data-chip-value="10"
+                    data-chip-color="azul"
+                  >
+                    <span class="chip-value">10</span>
+                  </button>
+                </div>
+
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="vermelha">10</span>
+                  <button
+                    class="chip chip-vermelha"
+                    data-chip-value="20"
+                    data-chip-color="vermelha"
+                  >
+                    <span class="chip-value">20</span>
+                  </button>
+                </div>
+
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="verde">4</span>
+                  <button
+                    class="chip chip-verde"
+                    data-chip-value="50"
+                    data-chip-color="verde"
+                  >
+                    <span class="chip-value">50</span>
+                  </button>
+                </div>
+
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="branca">2</span>
+                  <button
+                    class="chip chip-branca"
+                    data-chip-value="100"
+                    data-chip-color="branca"
+                  >
+                    <span class="chip-value">100</span>
+                  </button>
+                </div>
+
+                <div class="chip-wrap">
+                  <span class="chip-count" data-count-for="amarela">1</span>
+                  <button
+                    class="chip chip-amarela"
+                    data-chip-value="200"
+                    data-chip-color="amarela"
+                  >
+                    <span class="chip-value">200</span>
+                  </button>
+                </div>
+              </div>
+
               <div class="flex gap-2">
                 <button
                   id="btn-clear-bet"
-                  class="border border-cream/25 text-cream/80 font-body text-sm font-medium px-4 py-2 rounded-lg"
+                  class="flex-1 border border-cream/25 text-cream/80 font-body text-sm font-medium py-2.5 rounded-lg"
                 >
                   Limpar
                 </button>
                 <button
                   id="btn-confirm-bet"
-                  class="bg-gold text-ink font-body text-sm font-semibold px-4 py-2 rounded-lg"
+                  class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg"
                 >
-                  Apostar
+                  Confirmar Aumento
                 </button>
               </div>
             </div>
-
-            <!-- Fichas do jogador -->
-            <div class="grid grid-cols-6 gap-2 justify-items-center">
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="preta">20</span>
-                <button
-                  class="chip chip-preta"
-                  data-chip-value="5"
-                  data-chip-color="preta"
-                >
-                  <span class="chip-value">5</span>
-                </button>
-              </div>
-
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="azul">10</span>
-                <button
-                  class="chip chip-azul"
-                  data-chip-value="10"
-                  data-chip-color="azul"
-                >
-                  <span class="chip-value">10</span>
-                </button>
-              </div>
-
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="vermelha">10</span>
-                <button
-                  class="chip chip-vermelha"
-                  data-chip-value="20"
-                  data-chip-color="vermelha"
-                >
-                  <span class="chip-value">20</span>
-                </button>
-              </div>
-
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="verde">4</span>
-                <button
-                  class="chip chip-verde"
-                  data-chip-value="50"
-                  data-chip-color="verde"
-                >
-                  <span class="chip-value">50</span>
-                </button>
-              </div>
-
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="branca">2</span>
-                <button
-                  class="chip chip-branca"
-                  data-chip-value="100"
-                  data-chip-color="branca"
-                >
-                  <span class="chip-value">100</span>
-                </button>
-              </div>
-
-              <div class="chip-wrap">
-                <span class="chip-count" data-count-for="amarela">1</span>
-                <button
-                  class="chip chip-amarela"
-                  data-chip-value="200"
-                  data-chip-color="amarela"
-                >
-                  <span class="chip-value">200</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Botão desistir -->
-            <button
-              id="btn-fold"
-              class="w-full mt-4 bg-transparent border border-burgundy text-burgundy font-body font-semibold text-sm py-2.5 rounded-lg"
-            >
-              Desistir da rodada
-            </button>
           </div>
         </div>
       </div>
 
       <!-- ======================================================= -->
-      <!-- BOTÃO FLUTUANTE DE REGRAS (alternativa visível sempre)   -->
+      <!-- BOTÃO FLUTUANTE DE REGRAS (único, fixo, canto sup. direito) -->
       <!-- ======================================================= -->
       <button
-        id="btn-open-rules-fab"
-        class="hidden fixed bottom-52 right-4 w-12 h-12 rounded-full bg-gold text-ink font-display text-xl shadow-lg items-center justify-center z-40"
+        id="btn-rules-fab"
+        aria-label="Ver combinações de poker"
+        class="hidden rules-fab"
       >
         ?
       </button>
@@ -762,6 +881,7 @@
 
       // Se o jogador já desistiu da rodada atual.
       let hasFolded = false;
+      let currentCallAmount = 0; // recalculado sempre que o placar atualiza
 
       let myName = "";
       let roomCode = "";
@@ -821,6 +941,56 @@
       function renderPotUI() {
         const potEl = document.getElementById("pot-total");
         if (potEl) potEl.textContent = formatMoney(potTotal);
+      }
+
+      // Maior valor apostado nesta rodada entre jogadores que ainda estão na mão.
+      function getMaxTableBet() {
+        let max = 0;
+        playersCache.forEach(function (p) {
+          if (!p.folded && p.current_bet > max) max = p.current_bet;
+        });
+        return max;
+      }
+
+      // Total de fichas que ainda tenho (soma dos círculos visuais).
+      function getMyStackTotal() {
+        return calculateStackTotal(myChipCounts);
+      }
+
+      // Atualiza os textos e o estado (habilitado/desabilitado) dos 4 botões de ação.
+      function renderActionPanel() {
+        const me = playersCache.find(function (p) {
+          return p.id === myPlayerId;
+        });
+        const myBet = me ? me.current_bet : 0;
+        const maxBet = getMaxTableBet();
+        const myStack = getMyStackTotal();
+
+        currentCallAmount = Math.max(0, maxBet - myBet);
+
+        document.getElementById("my-stack-display").textContent =
+          formatMoney(myStack);
+        document.getElementById("table-max-bet-display").textContent =
+          formatMoney(maxBet);
+        document.getElementById("call-amount-label").textContent =
+          currentCallAmount > 0
+            ? formatMoney(currentCallAmount)
+            : "nada a cobrir";
+        document.getElementById("allin-amount-label").textContent =
+          formatMoney(myStack);
+
+        const callBtn = document.getElementById("btn-action-call");
+        const raiseBtn = document.getElementById("btn-action-raise");
+        const allinBtn = document.getElementById("btn-action-allin");
+
+        // Call: desabilita se eu não tiver fichas suficientes pra cobrir.
+        callBtn.disabled = myStack < currentCallAmount;
+
+        // Raise: só faz sentido se eu tiver fichas além do que já cobriria o call.
+        raiseBtn.disabled = myStack <= currentCallAmount;
+
+        // All-in: sempre disponível, só desabilita de fato se eu já estiver zerado.
+        allinBtn.disabled = myStack <= 0;
       }
 
       // Quando o banco diz que meus "chips" totais AUMENTARAM (ex: ganhei o pote),
@@ -970,7 +1140,7 @@
         });
       });
 
-      // ---------- 4. BOTÃO "LIMPAR" ----------
+      // ---------- 4. BOTÃO "LIMPAR" (dentro do painel de montar o aumento) ----------
 
       document
         .getElementById("btn-clear-bet")
@@ -984,7 +1154,46 @@
           renderChipsUI();
         });
 
-      // ---------- 5. BOTÃO "APOSTAR" ----------
+      // ---------- 5. NAVEGAÇÃO ENTRE OS PAINÉIS (Ações <-> Montar Aumento) ----------
+
+      function showActionsPanel() {
+        document.getElementById("panel-raise").classList.add("hidden");
+        document.getElementById("panel-raise").classList.remove("flex");
+        document.getElementById("panel-actions").classList.remove("hidden");
+        document.getElementById("panel-actions").classList.add("flex");
+        renderActionPanel();
+      }
+
+      function showRaisePanel() {
+        document.getElementById("panel-actions").classList.add("hidden");
+        document.getElementById("panel-actions").classList.remove("flex");
+        document.getElementById("panel-raise").classList.remove("hidden");
+        document.getElementById("panel-raise").classList.add("flex");
+        renderChipsUI();
+      }
+
+      // Clicar em "Aumentar Aposta" esconde o menu de ações e abre as fichas.
+      document
+        .getElementById("btn-action-raise")
+        .addEventListener("click", function () {
+          if (document.getElementById("btn-action-raise").disabled) return;
+          showRaisePanel();
+        });
+
+      // "Voltar" devolve as fichas que estavam sendo montadas e volta pro menu de ações.
+      document
+        .getElementById("btn-raise-back")
+        .addEventListener("click", function () {
+          for (const color in pendingBetChips) {
+            myChipCounts[color] += pendingBetChips[color];
+            pendingBetChips[color] = 0;
+          }
+          currentBet = 0;
+          renderChipsUI();
+          showActionsPanel();
+        });
+
+      // ---------- 6. CONFIRMAR O AUMENTO (envia o valor montado com as fichas) ----------
 
       document
         .getElementById("btn-confirm-bet")
@@ -1000,7 +1209,6 @@
           const newChips = me.chips - betAmount;
           const newBet = me.current_bet + betAmount;
 
-          // Grava minha nova quantidade de fichas e minha aposta da rodada.
           const { error: playerError } = await supabaseClient
             .from("players")
             .update({ chips: newChips, current_bet: newBet })
@@ -1008,12 +1216,11 @@
 
           if (playerError) {
             alert(
-              "Não foi possível confirmar a aposta: " + playerError.message,
+              "Não foi possível confirmar o aumento: " + playerError.message,
             );
             return;
           }
 
-          // Soma o valor no pote da sala (lê o valor mais atual antes de somar).
           const { data: roomRow } = await supabaseClient
             .from("rooms")
             .select("pot")
@@ -1025,8 +1232,6 @@
             .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
             .eq("id", roomCode);
 
-          // Já sei que meu total mudou pra newChips, então evito que a reconciliação
-          // automática (que roda quando o Realtime confirmar) mexa nas fichas de novo.
           lastKnownChips = newChips;
 
           currentBet = 0;
@@ -1039,24 +1244,102 @@
             amarela: 0,
           };
           renderChipsUI();
+          showActionsPanel(); // volta pro menu de ações depois de confirmar
         });
 
-      // ---------- 6. BOTÃO "DESISTIR" (FOLD) ----------
+      // ---------- 7. BOTÃO "COBRIR APOSTA" (CALL) ----------
 
       document
-        .getElementById("btn-fold")
+        .getElementById("btn-action-call")
+        .addEventListener("click", async function () {
+          if (document.getElementById("btn-action-call").disabled) return;
+          if (currentCallAmount <= 0) return; // nada pra cobrir agora
+
+          const amount = currentCallAmount;
+          const me = playersCache.find(function (p) {
+            return p.id === myPlayerId;
+          });
+          if (!me) return;
+
+          removeChipsForAmount(amount); // reflete a saída das fichas visualmente
+
+          const newChips = me.chips - amount;
+          const newBet = me.current_bet + amount;
+
+          await supabaseClient
+            .from("players")
+            .update({ chips: newChips, current_bet: newBet })
+            .eq("id", myPlayerId);
+
+          const { data: roomRow } = await supabaseClient
+            .from("rooms")
+            .select("pot")
+            .eq("id", roomCode)
+            .single();
+
+          await supabaseClient
+            .from("rooms")
+            .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+            .eq("id", roomCode);
+
+          lastKnownChips = newChips;
+          renderChipsUI();
+          renderActionPanel();
+        });
+
+      // ---------- 8. BOTÃO "ALL-IN" ----------
+
+      document
+        .getElementById("btn-action-allin")
+        .addEventListener("click", async function () {
+          if (document.getElementById("btn-action-allin").disabled) return;
+
+          const me = playersCache.find(function (p) {
+            return p.id === myPlayerId;
+          });
+          if (!me) return;
+
+          const amount = getMyStackTotal();
+          if (amount <= 0) return;
+
+          // Zera todas as fichas visuais — foi tudo pro meio.
+          for (const color in myChipCounts) myChipCounts[color] = 0;
+
+          const newChips = me.chips - amount;
+          const newBet = me.current_bet + amount;
+
+          await supabaseClient
+            .from("players")
+            .update({ chips: newChips, current_bet: newBet })
+            .eq("id", myPlayerId);
+
+          const { data: roomRow } = await supabaseClient
+            .from("rooms")
+            .select("pot")
+            .eq("id", roomCode)
+            .single();
+
+          await supabaseClient
+            .from("rooms")
+            .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+            .eq("id", roomCode);
+
+          lastKnownChips = newChips;
+          renderChipsUI();
+          renderActionPanel();
+        });
+
+      // ---------- 9. BOTÃO "DESISTIR" (FOLD) ----------
+
+      document
+        .getElementById("btn-action-fold")
         .addEventListener("click", async function () {
           hasFolded = !hasFolded;
 
-          const foldBtn = document.getElementById("btn-fold");
-          foldBtn.textContent = hasFolded
-            ? "Voltar para a rodada"
-            : "Desistir da rodada";
-
-          // Enquanto desistido, trava as fichas para não apostar por engano.
-          document.querySelectorAll(".chip").forEach(function (c) {
-            c.disabled = hasFolded || myChipCounts[c.dataset.chipColor] <= 0;
-          });
+          const foldBtn = document.getElementById("btn-action-fold");
+          foldBtn.querySelector("span").textContent = hasFolded
+            ? "Voltar pra rodada"
+            : "Desistir";
 
           await supabaseClient
             .from("players")
@@ -1149,8 +1432,10 @@
             .eq("id", roomCode);
 
           hasFolded = false;
-          document.getElementById("btn-fold").textContent =
-            "Desistir da rodada";
+          document
+            .getElementById("btn-action-fold")
+            .querySelector("span").textContent = "Desistir";
+          showActionsPanel();
         });
 
       // ---------- 9. MODAL DE REGRAS ----------
@@ -1168,10 +1453,7 @@
       }
 
       document
-        .getElementById("btn-open-rules")
-        .addEventListener("click", openRulesModal);
-      document
-        .getElementById("btn-open-rules-fab")
+        .getElementById("btn-rules-fab")
         .addEventListener("click", openRulesModal);
       document
         .getElementById("btn-close-rules")
@@ -1191,15 +1473,18 @@
         document.getElementById("screen-home").classList.remove("is-active");
         document.getElementById("screen-table").classList.add("is-active");
         document.getElementById("player-dock").classList.remove("hidden");
-        document
-          .getElementById("btn-open-rules-fab")
-          .classList.remove("hidden");
-        document.getElementById("btn-open-rules-fab").classList.add("flex");
+        document.getElementById("btn-rules-fab").classList.remove("hidden");
 
         document.getElementById("room-code-display").textContent = roomCode;
         document
           .getElementById("btn-force-ante")
           .classList.toggle("hidden", !isHost);
+
+        // Sempre entra mostrando o menu de ações (não as fichas).
+        document.getElementById("panel-raise").classList.add("hidden");
+        document.getElementById("panel-raise").classList.remove("flex");
+        document.getElementById("panel-actions").classList.remove("hidden");
+        document.getElementById("panel-actions").classList.add("flex");
 
         renderChipsUI();
         renderPotUI();
@@ -1263,13 +1548,17 @@
 
         if (me) {
           hasFolded = me.folded;
-          document.getElementById("btn-fold").textContent = hasFolded
-            ? "Voltar para a rodada"
-            : "Desistir da rodada";
+          const foldBtn = document.getElementById("btn-action-fold");
+          foldBtn.querySelector("span").textContent = hasFolded
+            ? "Voltar pra rodada"
+            : "Desistir";
           document.querySelectorAll(".chip").forEach(function (c) {
             c.disabled = hasFolded || myChipCounts[c.dataset.chipColor] <= 0;
           });
         }
+
+        // Recalcula os valores e o estado dos botões de ação com os dados mais recentes.
+        renderActionPanel();
       }
 
       function subscribeToRoom() {
