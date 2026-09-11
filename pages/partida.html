@@ -48,7 +48,11 @@
     <header class="flex items-center justify-between px-5 pt-6 pb-4">
       <div>
         <p class="text-cream/50 text-[11px] font-body">Sala</p>
-        <p id="room-code-display" class="font-display text-cream text-lg tracking-widest">------</p>
+        <div class="flex items-center gap-2">
+          <p id="room-code-display" class="font-display text-cream text-lg tracking-widest">------</p>
+          <button id="btn-generate-code" title="Gerar novo código (expulsa quem tentar entrar com o antigo)"
+            class="hidden text-gold/70 text-xs font-body underline">novo código</button>
+        </div>
         <a id="link-leave-room" href="home.html" class="text-cream/30 text-[10px] font-body underline">sair da sala</a>
       </div>
 
@@ -65,7 +69,7 @@
     <div class="px-5 mb-4">
       <button id="btn-force-ante"
         class="hidden w-full bg-burgundy/80 hover:bg-burgundy text-cream font-body font-semibold text-sm py-2.5 rounded-lg">
-        Cobrar Ante (5 de todos)
+        Cobrar Antes
       </button>
     </div>
 
@@ -77,9 +81,10 @@
       </div>
     </div>
 
-    <!-- Selecionar vencedor do pote -->
-    <div class="px-5 mt-5">
+    <!-- Selecionar vencedor do pote (só o Host vê) -->
+    <div id="panel-give-pot" class="hidden px-5 mt-5">
       <label class="block text-cream/60 text-xs font-body mb-1" for="select-winner">Vencedor da rodada</label>
+
       <div class="flex gap-2">
         <select id="select-winner"
           class="flex-1 bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2.5 font-body outline-none focus:border-gold">
@@ -308,6 +313,36 @@
           </div>
         </li>
       </ol>
+
+    </div>
+  </div>
+
+
+  <!-- ======================================================= -->
+  <!-- MODAL: Transferência de Host (obrigatório ao sair)       -->
+  <!-- ======================================================= -->
+  <div id="modal-transfer-host" class="hidden fixed inset-0 z-50 items-center justify-center px-4 modal-backdrop">
+    <div class="table-rail bg-felt w-full max-w-sm p-5">
+
+      <h2 class="font-display text-cream text-xl mb-2">Antes de sair...</h2>
+      <p id="transfer-host-intro" class="text-cream/60 text-xs font-body mb-4">
+        Escolha quem vai assumir como Host da mesa.
+      </p>
+
+      <div id="transfer-host-list" class="flex flex-col gap-2 mb-4 max-h-[40vh] overflow-y-auto">
+        <!-- Preenchido dinamicamente por js/partida.js -->
+      </div>
+
+      <div class="flex gap-2">
+        <button id="btn-cancel-transfer"
+          class="flex-1 border border-cream/25 text-cream/80 font-body text-sm font-medium py-2.5 rounded-lg">
+          Cancelar
+        </button>
+        <button id="btn-confirm-transfer" disabled
+          class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">
+          Confirmar e sair
+        </button>
+      </div>
 
     </div>
   </div>

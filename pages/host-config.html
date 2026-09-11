@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>GhostStackPoker — Configurar Sala</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          felt: { DEFAULT: '#0F3D2E', dark: '#0A2C21', light: '#155A42' },
+          burgundy: '#7A2331',
+          gold: { DEFAULT: '#C9A227', light: '#E4C558' },
+          cream: '#F1E9D8',
+          ink: '#151515'
+        },
+        fontFamily: {
+          display: ['Fraunces', 'serif'],
+          body: ['Inter', 'sans-serif']
+        }
+      }
+    }
+  }
+</script>
+
+<link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body class="felt-texture">
+
+<div class="app-frame felt-texture">
+  <div class="min-h-screen flex flex-col pb-10">
+
+    <!-- Cabeçalho -->
+    <header class="px-6 pt-8 pb-4 text-center">
+      <p class="text-gold tracking-wide text-sm font-body mb-1">Configurar sala</p>
+      <h1 class="font-display text-cream text-3xl leading-tight">Antes de abrir a mesa...</h1>
+      <p class="text-cream/50 text-xs font-body mt-2">
+        Sala <span id="room-code-display" class="text-gold font-semibold tracking-widest">------</span>
+        — só você (o Host) vê esta tela.
+      </p>
+    </header>
+
+    <!-- ===== Card: Saldo inicial ===== -->
+    <div class="table-rail bg-black/20 p-5 mb-5 mx-6">
+      <h2 class="font-display text-cream text-lg mb-1">Saldo inicial por jogador</h2>
+      <p class="text-cream/50 text-xs font-body mb-4">Quantas fichas cada jogador recebe ao entrar na mesa.</p>
+
+      <p id="starting-chips-display" class="text-center font-display text-gold text-4xl mb-3">1000</p>
+
+      <div class="flex items-center gap-3">
+        <button id="btn-chips-minus" type="button" aria-label="Diminuir"
+          class="w-10 h-10 rounded-full border border-gold/40 text-gold font-display text-xl flex items-center justify-center shrink-0">
+          −
+        </button>
+        <input id="slider-starting-chips" type="range" min="500" max="5000" step="100" value="1000" class="range-gold flex-1">
+        <button id="btn-chips-plus" type="button" aria-label="Aumentar"
+          class="w-10 h-10 rounded-full border border-gold/40 text-gold font-display text-xl flex items-center justify-center shrink-0">
+          +
+        </button>
+      </div>
+      <div class="flex justify-between text-cream/30 text-[10px] font-body mt-1">
+        <span>500</span><span>5000</span>
+      </div>
+    </div>
+
+    <!-- ===== Card: Regras da sala ===== -->
+    <div class="table-rail bg-black/20 p-5 mb-5 mx-6">
+      <h2 class="font-display text-cream text-lg mb-4">Regras da sala</h2>
+
+      <div class="flex items-center justify-between mb-4">
+        <div class="pr-4">
+          <p class="text-cream font-body font-medium text-sm">Permitir expulsar jogadores</p>
+          <p class="text-cream/50 text-xs font-body">Você poderá remover alguém da mesa a qualquer momento.</p>
+        </div>
+        <label class="toggle shrink-0">
+          <input type="checkbox" id="toggle-allow-kick" checked>
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <div class="pr-4">
+          <p class="text-cream font-body font-medium text-sm">Permitir doação de fichas</p>
+          <p class="text-cream/50 text-xs font-body">Se alguém zerar as fichas, os outros podem doar fichas pra ele continuar jogando.</p>
+        </div>
+        <label class="toggle shrink-0">
+          <input type="checkbox" id="toggle-allow-donations">
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ===== Card: Configurações da rodada ===== -->
+    <div class="table-rail bg-black/20 p-5 mb-5 mx-6">
+      <h2 class="font-display text-cream text-lg mb-4">Configurações da rodada</h2>
+
+      <label class="block text-cream/70 text-xs font-body mb-1" for="input-ante">Ante — quanto cada jogador paga automaticamente no início de cada rodada</label>
+      <input id="input-ante" type="number" min="0" step="5" value="5"
+        class="w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-4 py-2.5 font-body outline-none focus:border-gold">
+      <p class="text-cream/40 text-[11px] font-body mt-1 mb-4">Também conhecido como "pingo". Descontado de todos ao clicar em "Cobrar Antes" na mesa.</p>
+
+      <label class="block text-cream/70 text-xs font-body mb-1" for="input-max-players">Máximo de jogadores</label>
+      <input id="input-max-players" type="number" min="2" max="20" value="8"
+        class="w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-4 py-2.5 font-body outline-none focus:border-gold">
+    </div>
+
+    <!-- ===== Card: Configurações avançadas (acordeão) ===== -->
+    <div class="table-rail bg-black/20 mb-5 mx-6 overflow-hidden">
+      <button id="btn-toggle-advanced" type="button" class="w-full flex items-center justify-between p-5">
+        <div class="text-left">
+          <h2 class="font-display text-cream text-lg">Configurações avançadas</h2>
+          <p class="text-cream/50 text-xs font-body">Valor e quantidade de cada cor de ficha.</p>
+        </div>
+        <span id="advanced-chevron" class="accordion-chevron text-gold text-xl">⌄</span>
+      </button>
+
+      <div id="advanced-body" class="accordion-body px-5">
+        <div class="pb-5">
+
+          <div class="grid grid-cols-[1.2fr_1fr_1fr] gap-x-3 gap-y-3 items-center mb-1">
+            <span class="text-cream/40 text-[10px] font-body uppercase">Ficha</span>
+            <span class="text-cream/40 text-[10px] font-body uppercase">Valor</span>
+            <span class="text-cream/40 text-[10px] font-body uppercase">Quantidade</span>
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0" style="background:#1C1C1C"></span>
+              <span class="text-cream text-sm font-body">Preta</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="preta" value="5">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="preta" value="20">
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0" style="background:#1E5FA8"></span>
+              <span class="text-cream text-sm font-body">Azul</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="azul" value="10">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="azul" value="10">
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0" style="background:#B3242C"></span>
+              <span class="text-cream text-sm font-body">Vermelha</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="vermelha" value="20">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="vermelha" value="10">
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0" style="background:#1E8449"></span>
+              <span class="text-cream text-sm font-body">Verde</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="verde" value="50">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="verde" value="4">
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0 border border-cream/30" style="background:#E9E4D8"></span>
+              <span class="text-cream text-sm font-body">Branca</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="branca" value="100">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="branca" value="2">
+
+            <div class="flex items-center gap-2">
+              <span class="w-4 h-4 rounded-full shrink-0" style="background:#E0B400"></span>
+              <span class="text-cream text-sm font-body">Amarela</span>
+            </div>
+            <input type="number" min="1" class="chip-config-value w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="amarela" value="200">
+            <input type="number" min="0" class="chip-config-count w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2 font-body outline-none focus:border-gold" data-color="amarela" value="1">
+          </div>
+
+          <div class="flex items-center justify-between pt-3 mt-2 border-t border-gold/10">
+            <span class="text-cream/60 text-xs font-body">Total configurado</span>
+            <span id="advanced-total-display" class="font-display text-cream text-lg">1.000</span>
+          </div>
+
+          <button id="btn-recalc-advanced" type="button" class="text-gold/70 text-[11px] font-body underline mt-2">
+            Recalcular automaticamente a partir do saldo inicial
+          </button>
+
+          <p id="advanced-warning" class="hidden text-burgundy text-xs font-body mt-2"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Ações finais ===== -->
+    <div class="px-6 pb-4 mt-auto">
+      <button id="btn-open-table"
+        class="w-full bg-gold hover:bg-gold-light text-ink font-body font-semibold py-3.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gold">
+        Abrir Mesa
+      </button>
+      <button id="btn-cancel-room" type="button" class="w-full text-cream/40 text-xs font-body text-center mt-3 underline">
+        Cancelar e voltar
+      </button>
+      <p id="config-error" class="hidden text-burgundy text-sm text-center mt-3 font-body"></p>
+    </div>
+
+  </div>
+</div>
+
+<!-- SDK do Supabase (precisa vir ANTES dos nossos módulos) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script type="module" src="../js/host-config.js"></script>
+
+</body>
+</html>
