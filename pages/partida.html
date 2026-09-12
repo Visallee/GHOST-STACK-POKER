@@ -144,6 +144,20 @@
           </p>
         </div>
 
+        <!-- ===== PAINEL C: jogador eliminado (aguardando rebuy) ===== -->
+        <div id="panel-eliminated" class="hidden flex-col gap-3 text-center py-2">
+          <p class="text-cream/70 text-sm font-body">Você ficou sem fichas nesta partida.</p>
+
+          <button id="btn-request-rebuy"
+            class="w-full bg-gold text-ink font-body font-semibold py-2.5 rounded-lg text-sm">
+            Pedir para voltar a jogar
+          </button>
+
+          <p id="rebuy-pending-message" class="hidden text-gold/80 text-xs font-body">
+            Pedido enviado — aguardando o Host aprovar sua volta...
+          </p>
+        </div>
+
         <!-- ===== PAINEL B: montar valor do aumento com as fichas ===== -->
         <div id="panel-raise" class="hidden flex-col gap-0">
 

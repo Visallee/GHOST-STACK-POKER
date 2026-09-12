@@ -97,6 +97,33 @@
       </div>
     </div>
 
+    <!-- ===== Card: Condição de Vitória ===== -->
+    <div class="table-rail bg-black/20 p-5 mb-5 mx-6">
+      <h2 class="font-display text-cream text-lg mb-1">Condição de vitória</h2>
+      <p class="text-cream/50 text-xs font-body mb-4">Como o jogo termina.</p>
+
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <button type="button" id="btn-win-elimination"
+          class="win-condition-option is-selected border border-gold rounded-lg p-3 text-left">
+          <span class="block font-body font-semibold text-sm text-cream">Mata-mata</span>
+          <span class="block text-cream/50 text-[11px] font-body mt-0.5">Joga até sobrar 1 só</span>
+        </button>
+
+        <button type="button" id="btn-win-round-limit"
+          class="win-condition-option border border-cream/20 rounded-lg p-3 text-left">
+          <span class="block font-body font-semibold text-sm text-cream">Limite de rodadas</span>
+          <span class="block text-cream/50 text-[11px] font-body mt-0.5">Quem tiver mais fichas ganha</span>
+        </button>
+      </div>
+
+      <div id="round-limit-field" class="hidden">
+        <label class="block text-cream/70 text-xs font-body mb-1" for="input-round-limit">Número de rodadas</label>
+        <input id="input-round-limit" type="number" min="1" max="200" value="10"
+          class="w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-4 py-2.5 font-body outline-none focus:border-gold">
+        <p class="text-cream/40 text-[11px] font-body mt-1">Ao final da rodada <span id="round-limit-preview">10</span>, quem tiver mais fichas vence — mesmo que mais de 1 jogador ainda esteja na mesa.</p>
+      </div>
+    </div>
+
     <!-- ===== Card: Configurações da rodada ===== -->
     <div class="table-rail bg-black/20 p-5 mb-5 mx-6">
       <h2 class="font-display text-cream text-lg mb-4">Configurações da rodada</h2>

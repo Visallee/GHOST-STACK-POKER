@@ -52,7 +52,7 @@ let winCondition = 'elimination'; // 'elimination' ou 'round_limit'
 let roundLimit = null;
 let currentRound = 0;
 let gameStatus = 'in_progress';   // 'in_progress' ou 'finished'
-let startingChips = 1000;         // usado se algum dia o rebuy entrar em cena (Fase 3)
+let startingChips = 1000;         // usado pelo rebuy (Fase 4) pra saber com quanto o jogador volta
 
 function renderChipsUI() {
   for (const color in myChipCounts) {
@@ -152,6 +152,10 @@ function getMyStackTotal() {
 }
 
 function renderActionPanel() {
+  // Jogador eliminado tem seu próprio painel (panel-eliminated) — nada
+  // aqui embaixo (Call/Raise/All-in/turno) se aplica a ele.
+  if (!document.getElementById('panel-eliminated').classList.contains('hidden')) return;
+
   const me = playersCache.find(function (p) { return p.id === myPlayerId; });
   const myBet = me ? me.current_bet : 0;
   const maxBet = getMaxTableBet();
@@ -253,6 +257,11 @@ function renderLeaderboard(players) {
         '</button>'
       : '';
 
+    const showApproveRebuy = isHost && p.is_eliminated && p.needs_rebuy_approval;
+    const approveRebuyHtml = showApproveRebuy
+      ? '<button class="btn-approve-rebuy text-gold text-[10px] font-body underline ml-2" type="button" data-player-id="' + p.id + '">aprovar volta</button>'
+      : '';
+
     card.innerHTML =
       '<div class="flex items-center gap-2">' +
         '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
@@ -265,10 +274,17 @@ function renderLeaderboard(players) {
           '<p class="text-cream font-display text-base leading-none">' + formatMoney(p.chips) + '</p>' +
           '<p class="' + statusClass + ' text-[11px] font-body">' + statusText + '</p>' +
         '</div>' +
+        approveRebuyHtml +
         kickButtonHtml +
       '</div>';
 
     listEl.appendChild(card);
+  });
+
+  document.querySelectorAll('.btn-approve-rebuy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      handleApproveRebuy(btn.dataset.playerId);
+    });
   });
 
   document.querySelectorAll('.btn-kick-player').forEach(function (btn) {
@@ -346,6 +362,8 @@ function renderGivePotPanel() {
 }
 
 function showActionsPanel() {
+  document.getElementById('panel-eliminated').classList.add('hidden');
+  document.getElementById('panel-eliminated').classList.remove('flex');
   document.getElementById('panel-raise').classList.add('hidden');
   document.getElementById('panel-raise').classList.remove('flex');
   document.getElementById('panel-actions').classList.remove('hidden');
@@ -353,7 +371,23 @@ function showActionsPanel() {
   renderActionPanel();
 }
 
+// Mostra o painel de "você foi eliminado" — troca entre o botão de
+// pedir rebuy e a mensagem de "aguardando aprovação" conforme o caso.
+function showEliminatedPanel(needsApproval) {
+  document.getElementById('panel-actions').classList.add('hidden');
+  document.getElementById('panel-actions').classList.remove('flex');
+  document.getElementById('panel-raise').classList.add('hidden');
+  document.getElementById('panel-raise').classList.remove('flex');
+  document.getElementById('panel-eliminated').classList.remove('hidden');
+  document.getElementById('panel-eliminated').classList.add('flex');
+
+  document.getElementById('btn-request-rebuy').classList.toggle('hidden', needsApproval);
+  document.getElementById('rebuy-pending-message').classList.toggle('hidden', !needsApproval);
+}
+
 function showRaisePanel() {
+  document.getElementById('panel-eliminated').classList.add('hidden');
+  document.getElementById('panel-eliminated').classList.remove('flex');
   document.getElementById('panel-actions').classList.add('hidden');
   document.getElementById('panel-actions').classList.remove('flex');
   document.getElementById('panel-raise').classList.remove('hidden');
@@ -544,11 +578,14 @@ document.getElementById('btn-action-fold').addEventListener('click', async funct
 document.getElementById('btn-start-hand').addEventListener('click', async function () {
   if (!isHost) return;
 
-  const occupiedSeats = getOccupiedSeats(playersCache);
-  if (occupiedSeats.length === 0) return;
+  // Usa "assentos ATIVOS" (não eliminados) pra calcular Dealer/Blinds —
+  // não faz sentido o botão do Dealer ou uma blind cair em alguém com
+  // 0 fichas, que nem pode participar da mão até fazer rebuy.
+  const activeSeatsForNewHand = getActiveSeats(playersCache);
+  if (activeSeatsForNewHand.length === 0) return;
 
-  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
-  const firstToActSeat = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+  const newDealerSeat = computeNextDealerSeat(activeSeatsForNewHand, dealerSeat);
+  const firstToActSeat = computeBlindSeats(activeSeatsForNewHand, newDealerSeat).firstToActSeat;
 
   const btn = document.getElementById('btn-start-hand');
   btn.disabled = true;
@@ -579,7 +616,9 @@ document.getElementById('btn-force-ante').addEventListener('click', async functi
   if (!roomRow) return;
   const anteAmount = roomRow.ante_amount;
 
-  const activePlayers = playersCache.filter(function (p) { return !p.folded; });
+  // Nunca cobra ante de quem desistiu OU já está eliminado (sem fichas
+  // pra pagar) — cobrar dos eliminados deixaria o saldo deles negativo.
+  const activePlayers = playersCache.filter(function (p) { return !p.folded && !p.is_eliminated; });
 
   await Promise.all(activePlayers.map(function (p) {
     return supabaseClient
@@ -651,10 +690,12 @@ async function resolveEndOfHand(assignments) {
   }));
 
   // 3) Gira o Dealer e calcula quem age primeiro na PRÓXIMA mão (só
-  // importa de verdade se o jogo for continuar).
-  const occupiedSeats = getOccupiedSeats(playersCache);
-  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
-  const nextHandTurn = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+  // importa de verdade se o jogo for continuar). Usa "updatedPlayers"
+  // (não "playersCache") porque alguém pode ter acabado de ZERAR
+  // NESTA MESMA mão — não pode virar Dealer/Blind de olho já eliminado.
+  const activeSeatsForNextHand = getActiveSeats(updatedPlayers);
+  const newDealerSeat = computeNextDealerSeat(activeSeatsForNextHand, dealerSeat);
+  const nextHandTurn = computeBlindSeats(activeSeatsForNextHand, newDealerSeat).firstToActSeat;
 
   // 4) Avalia a condição de vitória com os dados JÁ atualizados desta mão.
   const newRound = currentRound + 1;
@@ -782,6 +823,40 @@ async function handleKickPlayer(playerId, playerName) {
       await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
     }
   }
+}
+
+// ---------- REBUY / RE-ENTRY: jogador eliminado pede, Host aprova ----------
+
+document.getElementById('btn-request-rebuy').addEventListener('click', async function () {
+  const btn = document.getElementById('btn-request-rebuy');
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+
+  await supabaseClient
+    .from('players')
+    .update({ needs_rebuy_approval: true })
+    .eq('id', myPlayerId);
+
+  btn.disabled = false;
+  btn.textContent = 'Pedir para voltar a jogar';
+  // A troca de texto pra "aguardando aprovação" acontece sozinha no
+  // próximo refreshPlayers(), quando o Realtime confirmar a mudança.
+});
+
+async function handleApproveRebuy(playerId) {
+  if (!isHost) return;
+
+  await supabaseClient
+    .from('players')
+    .update({
+      is_eliminated: false,
+      needs_rebuy_approval: false,
+      eliminated_at: null,
+      chips: startingChips,
+      current_bet: 0,
+      folded: false
+    })
+    .eq('id', playerId);
 }
 
 const rulesModal = document.getElementById('modal-rules');
@@ -927,7 +1002,15 @@ async function refreshPlayers() {
     c.disabled = hasFolded || myChipCounts[c.dataset.chipColor] <= 0;
   });
 
-  renderActionPanel();
+  // Decide qual dos 3 painéis do dock mostrar: eliminado, ou o normal
+  // (ações/fichas). Se acabei de ter o rebuy aprovado, volta pro normal.
+  if (me.is_eliminated) {
+    showEliminatedPanel(me.needs_rebuy_approval);
+  } else if (!document.getElementById('panel-eliminated').classList.contains('hidden')) {
+    showActionsPanel(); // já chama renderActionPanel() internamente
+  } else {
+    renderActionPanel();
+  }
 }
 
 async function refreshRoomInfo() {

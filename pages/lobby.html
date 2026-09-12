@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
+    />
+    <title>GhostStackPoker — Fim de Jogo</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              felt: { DEFAULT: "#0F3D2E", dark: "#0A2C21", light: "#155A42" },
+              burgundy: "#7A2331",
+              gold: { DEFAULT: "#C9A227", light: "#E4C558" },
+              cream: "#F1E9D8",
+              ink: "#151515",
+            },
+            fontFamily: {
+              display: ["Fraunces", "serif"],
+              body: ["Inter", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+
+    <link rel="stylesheet" href="../css/style.css" />
+  </head>
+
+  <body class="felt-texture">
+    <div class="app-frame felt-texture">
+      <div class="min-h-screen flex flex-col pb-10">
+        <!-- Cabeçalho -->
+        <header class="px-6 pt-8 pb-4 text-center">
+          <p class="text-gold tracking-wide text-sm font-body mb-1">
+            Fim de jogo
+          </p>
+          <h1 class="font-display text-cream text-3xl leading-tight">
+            Resultado da Mesa
+          </h1>
+          <p class="text-cream/40 text-xs font-body mt-2">
+            Sala
+            <span id="room-code-display" class="text-gold tracking-widest"
+              >------</span
+            >
+          </p>
+        </header>
+
+        <!-- ===== Pódio: Vencedor em destaque ===== -->
+        <div
+          class="table-rail bg-black/20 p-6 mb-5 mx-6 text-center"
+          id="winner-spotlight"
+        >
+          <p class="text-gold text-3xl mb-2">🎉</p>
+          <p class="text-cream/60 text-xs font-body mb-1">Parabéns</p>
+          <h2 id="winner-name" class="font-display text-cream text-3xl mb-4">
+            —
+          </h2>
+
+          <div class="flex justify-center gap-8">
+            <div>
+              <p
+                id="winner-chips"
+                class="font-display text-gold text-2xl leading-none"
+              >
+                0
+              </p>
+              <p class="text-cream/50 text-[11px] font-body mt-1">
+                fichas finais
+              </p>
+            </div>
+            <div>
+              <p
+                id="winner-rounds"
+                class="font-display text-cream text-2xl leading-none"
+              >
+                0
+              </p>
+              <p class="text-cream/50 text-[11px] font-body mt-1">
+                rodadas jogadas
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== Ranking dos demais ===== -->
+        <div class="px-6 mb-5">
+          <h3 class="text-cream/60 text-xs font-body mb-2 tracking-wide">
+            Classificação
+          </h3>
+          <div id="ranking-list" class="flex flex-col gap-2">
+            <!-- Preenchido dinamicamente por js/lobby.js -->
+          </div>
+        </div>
+
+        <!-- ===== Painel exclusivo do Host ===== -->
+        <div id="host-panel" class="hidden px-6 mb-5">
+          <div class="table-rail bg-black/20 p-5">
+            <h3 class="font-display text-cream text-lg mb-4">
+              Controles do Host
+            </h3>
+
+            <div class="flex items-center justify-between mb-4">
+              <div class="pr-4">
+                <p class="text-cream font-body font-medium text-sm">
+                  Permitir doação de fichas
+                </p>
+                <p class="text-cream/50 text-xs font-body">
+                  Jogadores podem doar fichas uns aos outros na próxima partida.
+                </p>
+              </div>
+              <label class="toggle shrink-0">
+                <input type="checkbox" id="toggle-allow-donations-lobby" />
+                <span class="track"><span class="thumb"></span></span>
+              </label>
+            </div>
+
+            <button
+              id="btn-open-transfer-host"
+              type="button"
+              class="w-full border border-gold/40 text-gold font-body font-semibold text-sm py-2.5 rounded-lg mb-2"
+            >
+              Passar a coroa de Host
+            </button>
+          </div>
+        </div>
+
+        <!-- ===== Jogar Novamente ===== -->
+        <div class="px-6 mt-auto">
+          <button
+            id="btn-play-again"
+            class="hidden w-full bg-gold hover:bg-gold-light text-ink font-body font-semibold py-3.5 rounded-lg transition-colors"
+          >
+            Jogar Novamente
+          </button>
+          <p
+            id="waiting-host-message"
+            class="text-cream/40 text-xs font-body text-center mt-3"
+          >
+            Aguardando o Host iniciar uma nova partida...
+          </p>
+          <a
+            href="home.html"
+            id="link-leave-lobby"
+            class="block text-center text-cream/30 text-xs font-body underline mt-4"
+          >
+            sair pro lobby principal
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================================================= -->
+    <!-- MODAL: Passar a coroa de Host                            -->
+    <!-- ======================================================= -->
+    <div
+      id="modal-transfer-host"
+      class="hidden fixed inset-0 z-50 items-center justify-center px-4 modal-backdrop"
+    >
+      <div class="table-rail bg-felt w-full max-w-sm p-5">
+        <h2 class="font-display text-cream text-xl mb-2">Passar a coroa</h2>
+        <p class="text-cream/60 text-xs font-body mb-4">
+          Escolha quem vai virar o novo Host.
+        </p>
+
+        <div
+          id="transfer-host-list"
+          class="flex flex-col gap-2 mb-4 max-h-[40vh] overflow-y-auto"
+        >
+          <!-- Preenchido dinamicamente -->
+        </div>
+
+        <div class="flex gap-2">
+          <button
+            id="btn-cancel-transfer"
+            class="flex-1 border border-cream/25 text-cream/80 font-body text-sm font-medium py-2.5 rounded-lg"
+          >
+            Cancelar
+          </button>
+          <button
+            id="btn-confirm-transfer"
+            disabled
+            class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script type="module" src="../js/lobby.js"></script>
+  </body>
+</html>

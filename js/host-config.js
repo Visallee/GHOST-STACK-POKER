@@ -43,6 +43,37 @@ const btnOpenTable = document.getElementById('btn-open-table');
 
 const colors = ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'];
 
+// ---------- CONDIÇÃO DE VITÓRIA ----------
+
+let winCondition = 'elimination'; // 'elimination' ou 'round_limit'
+
+const btnWinElimination = document.getElementById('btn-win-elimination');
+const btnWinRoundLimit = document.getElementById('btn-win-round-limit');
+const roundLimitField = document.getElementById('round-limit-field');
+const inputRoundLimit = document.getElementById('input-round-limit');
+const roundLimitPreview = document.getElementById('round-limit-preview');
+
+function setWinCondition(mode) {
+  winCondition = mode;
+
+  btnWinElimination.classList.toggle('is-selected', mode === 'elimination');
+  btnWinElimination.classList.toggle('border-gold', mode === 'elimination');
+  btnWinElimination.classList.toggle('border-cream/20', mode !== 'elimination');
+
+  btnWinRoundLimit.classList.toggle('is-selected', mode === 'round_limit');
+  btnWinRoundLimit.classList.toggle('border-gold', mode === 'round_limit');
+  btnWinRoundLimit.classList.toggle('border-cream/20', mode !== 'round_limit');
+
+  roundLimitField.classList.toggle('hidden', mode !== 'round_limit');
+}
+
+btnWinElimination.addEventListener('click', function () { setWinCondition('elimination'); });
+btnWinRoundLimit.addEventListener('click', function () { setWinCondition('round_limit'); });
+
+inputRoundLimit.addEventListener('input', function () {
+  roundLimitPreview.textContent = inputRoundLimit.value || '—';
+});
+
 
 // ---------- 4. FUNÇÕES DE APOIO ----------
 
@@ -195,6 +226,9 @@ btnOpenTable.addEventListener('click', async function () {
   const allowDonations = document.getElementById('toggle-allow-donations').checked;
   const anteAmount = Math.max(0, Number(document.getElementById('input-ante').value) || 0);
   const maxPlayers = Math.min(20, Math.max(2, Number(document.getElementById('input-max-players').value) || 8));
+  const roundLimit = winCondition === 'round_limit'
+    ? Math.max(1, Number(inputRoundLimit.value) || 10)
+    : null;
 
   btnOpenTable.disabled = true;
   btnOpenTable.textContent = 'Abrindo mesa...';
@@ -211,7 +245,9 @@ btnOpenTable.addEventListener('click', async function () {
       max_players: maxPlayers,
       ante_amount: anteAmount,
       chip_values: values,
-      chip_counts: counts
+      chip_counts: counts,
+      win_condition: winCondition,
+      round_limit: roundLimit
     })
     .eq('id', roomCode);
 
