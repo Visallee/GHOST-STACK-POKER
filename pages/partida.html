@@ -85,20 +85,9 @@
       </div>
     </div>
 
-    <!-- Selecionar vencedor do pote (só o Host vê) -->
+    <!-- Entrega de pote(s) da rodada (só o Host vê) — preenchido dinamicamente -->
     <div id="panel-give-pot" class="hidden px-5 mt-5">
-      <label class="block text-cream/60 text-xs font-body mb-1" for="select-winner">Vencedor da rodada</label>
-
-      <div class="flex gap-2">
-        <select id="select-winner"
-          class="flex-1 bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2.5 font-body outline-none focus:border-gold">
-          <option value="">Selecionar jogador...</option>
-        </select>
-        <button id="btn-give-pot"
-          class="bg-gold text-ink font-body font-semibold px-4 rounded-lg text-sm whitespace-nowrap">
-          Entregar pote
-        </button>
-      </div>
+      <div id="give-pot-container"></div>
     </div>
 
   </section>
