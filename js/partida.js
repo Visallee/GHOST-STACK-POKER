@@ -17,6 +17,13 @@ import {
   addChipsFromAmount,
   removeChipsForAmount
 } from './chips.js';
+import {
+  getOccupiedSeats,
+  getActiveSeats,
+  getNextTurnSeat,
+  computeNextDealerSeat,
+  computeBlindSeats
+} from './turn.js';
 
 
 // ---------- 1. SESSÃO: quem sou eu e em qual sala eu estou ----------
@@ -55,6 +62,11 @@ let anteCollected = false;   // controla se "Cobrar Antes" já foi usado nesta r
 let allowKick = false;       // configurado pelo host em host-config.html
 let selectedNewHostId = null; // usado no modal de transferência de host
 
+// ----- Controle de turnos -----
+let dealerSeat = null;       // assento com o botão do Dealer nesta mão (rooms.dealer_seat)
+let currentTurnSeat = null;  // assento de quem tem a vez agora (rooms.current_turn_seat);
+                              // null = nenhuma mão em andamento ainda
+
 
 // ---------- 3. FUNÇÕES DE RENDER (tudo que toca o DOM) ----------
 
@@ -80,15 +92,84 @@ function renderRoomCodeUI() {
   document.getElementById('room-code-display').textContent = joinCode;
 }
 
+// ---------- FUNÇÕES DE TURNO (apoio) ----------
+
+// Meu número de assento (fixo, atribuído em home.js ao entrar na sala).
+function getMySeatNumber() {
+  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+  return me ? me.seat_number : null;
+}
+
+// true se agora é a minha vez de agir.
+function isMyTurn() {
+  const mySeat = getMySeatNumber();
+  return mySeat !== null && mySeat !== undefined && mySeat === currentTurnSeat;
+}
+
+// Assento de quem tem a vez agora, junto com o nome (pra mostrar na
+// mensagem "Aguardando Fulano jogar...").
+function getCurrentTurnPlayer() {
+  return playersCache.find(function (p) { return p.seat_number === currentTurnSeat; }) || null;
+}
+
+// Recalcula quem age primeiro na mão atual (a partir do Dealer e dos
+// assentos ocupados), usado tanto pra saber se estamos no "primeiro
+// turno da mão" (libera "Cobrar Antes") quanto no cálculo de mãos novas.
+function getFirstToActSeat() {
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  return computeBlindSeats(occupiedSeats, dealerSeat).firstToActSeat;
+}
+
+// Clona playersCache substituindo os campos do MEU jogador pelos
+// valores que acabaram de ser gravados no banco (o Realtime ainda não
+// voltou com a confirmação) — usado só pra calcular o próximo turno
+// sem esperar o round-trip do Supabase.
+function buildProjectedPlayers(overrides) {
+  return playersCache.map(function (p) {
+    if (p.id !== myPlayerId) return p;
+    return Object.assign({}, p, overrides);
+  });
+}
+
+// Depois que EU ajo (call/raise/all-in/fold), calcula e grava no
+// Supabase quem joga em seguida. "overrides" descreve como o MEU
+// jogador ficou depois da ação (chips e/ou folded).
+async function advanceTurnAfterMyAction(overrides) {
+  const mySeat = getMySeatNumber();
+  if (mySeat === null || mySeat === undefined) return;
+
+  const projected = buildProjectedPlayers(overrides);
+  const occupiedSeats = getOccupiedSeats(projected);
+  const activeSeats = getActiveSeats(projected);
+
+  const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, mySeat);
+  if (nextSeat === null) return; // só sobrou 1 jogador ativo — o Host encerra a mão manualmente
+
+  currentTurnSeat = nextSeat; // atualização otimista; o Realtime confirma depois
+  renderLeaderboard(playersCache);
+  renderActionPanel();
+  renderHostUI();
+
+  await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+}
+
 // Mostra/esconde tudo que só o Host pode ver ou fazer. Chamada sempre
-// que "isHost", "anteCollected" ou os dados do jogador mudarem.
+// que "isHost", "anteCollected", o turno ou os dados do jogador mudarem.
 function renderHostUI() {
   document.getElementById('btn-generate-code').classList.toggle('hidden', !isHost);
   document.getElementById('panel-give-pot').classList.toggle('hidden', !isHost);
 
-  // "Cobrar Antes" some assim que é usado, e só volta depois que o
-  // Host entrega o pote (o que encerra a rodada).
-  const showAnteBtn = isHost && !anteCollected;
+  const handInProgress = currentTurnSeat !== null && currentTurnSeat !== undefined;
+
+  // "Iniciar Mão" só aparece pro Host quando ainda não há nenhuma mão
+  // em andamento (começo da sessão, antes do primeiro turno existir).
+  document.getElementById('btn-start-hand').classList.toggle('hidden', !(isHost && !handInProgress));
+
+  // "Cobrar Antes" só fica habilitado durante o PRIMEIRO turno da mão
+  // (pré-flop, antes de quem age primeiro sequer jogar) — depois disso,
+  // some, mesmo que ainda não tenha sido usado.
+  const isFirstTurnOfHand = handInProgress && currentTurnSeat === getFirstToActSeat();
+  const showAnteBtn = isHost && !anteCollected && isFirstTurnOfHand;
   document.getElementById('btn-force-ante').classList.toggle('hidden', !showAnteBtn);
 }
 
@@ -125,6 +206,36 @@ function renderActionPanel() {
   callBtn.disabled = myStack < currentCallAmount;
   raiseBtn.disabled = myStack <= currentCallAmount;
   allinBtn.disabled = myStack <= 0;
+
+  // ----- Bloqueio de turno: some com os controles de quem não tem a vez -----
+  const myTurn = isMyTurn();
+  const grid = document.getElementById('action-buttons-grid');
+  const statusLabel = document.getElementById('turn-status-label');
+  const waitingMsg = document.getElementById('turn-waiting-message');
+  const waitingName = document.getElementById('turn-waiting-name');
+
+  grid.classList.toggle('hidden', !myTurn);
+  statusLabel.classList.toggle('hidden', !myTurn);
+  waitingMsg.classList.toggle('hidden', myTurn);
+
+  if (!myTurn) {
+    const turnPlayer = getCurrentTurnPlayer();
+    waitingName.textContent = turnPlayer ? turnPlayer.name : 'outro jogador';
+
+    // Se o turno passou pra outra pessoa enquanto eu estava montando um
+    // aumento, devolve minhas fichas pendentes e me tira do painel de
+    // montar aposta — não faz sentido deixar aberto sem poder confirmar.
+    const raisePanel = document.getElementById('panel-raise');
+    if (!raisePanel.classList.contains('hidden')) {
+      for (const color in pendingBetChips) {
+        myChipCounts[color] += pendingBetChips[color];
+        pendingBetChips[color] = 0;
+      }
+      currentBet = 0;
+      renderChipsUI();
+      showActionsPanel();
+    }
+  }
 }
 
 function escapeHtml(text) {
@@ -143,26 +254,45 @@ function renderLeaderboard(players) {
 
   players.forEach(function (p) {
     const isMe = p.id === myPlayerId;
+    const isPlayersTurn = currentTurnSeat !== null && p.seat_number === currentTurnSeat;
+    const isDealer = dealerSeat !== null && p.seat_number === dealerSeat;
 
     const card = document.createElement('div');
     card.className = 'player-card flex items-center justify-between px-4 py-3' +
       (p.folded ? ' is-folded' : '') +
-      (isMe ? ' is-turn' : '');
+      (isMe ? ' is-turn' : '') +
+      (isPlayersTurn ? ' active-player-turn' : '');
 
     const statusText = p.folded ? 'desistiu' : (p.current_bet > 0 ? ('apostou ' + formatMoney(p.current_bet)) : 'aguardando');
     const statusClass = p.folded ? 'text-burgundy' : (p.current_bet > 0 ? 'text-gold/80' : 'text-cream/40');
+
+    // Selo do Dealer e indicador textual de "é a vez dele" — em CSS
+    // separado de .is-turn (que já é usado para "sou eu" e para o
+    // modal de transferência de host).
+    const dealerBadgeHtml = isDealer ? '<span class="dealer-badge" title="Botão do Dealer">D</span>' : '';
+    const turnBadgeHtml = isPlayersTurn
+      ? '<span class="text-gold text-[10px] font-body font-semibold uppercase tracking-wide ml-1">● vez</span>'
+      : '';
 
     // Botão de expulsar: só aparece pro Host, nos jogadores QUE NÃO são
     // ele mesmo, e só se a sala permitir expulsão (definido no host-config).
     const showKick = isHost && allowKick && !isMe;
     const kickButtonHtml = showKick
-      ? '<button class="btn-kick-player text-burgundy/70 text-[10px] font-body underline ml-2" data-player-id="' + p.id + '" data-player-name="' + escapeHtml(p.name) + '">expulsar</button>'
+      ? '<button class="btn-kick-player" type="button" aria-label="Expulsar ' + escapeHtml(p.name) + '" title="Expulsar jogador" data-player-id="' + p.id + '" data-player-name="' + escapeHtml(p.name) + '">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M16 17l5-5-5-5"/>' +
+            '<path d="M21 12H9"/>' +
+            '<path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/>' +
+          '</svg>' +
+        '</button>'
       : '';
 
     card.innerHTML =
       '<div class="flex items-center gap-2">' +
         '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
         '<span class="text-cream font-body font-medium text-sm">' + escapeHtml(p.name) + (isMe ? ' (você)' : '') + (p.is_host ? ' 👑' : '') + '</span>' +
+        dealerBadgeHtml +
+        turnBadgeHtml +
       '</div>' +
       '<div class="flex items-center">' +
         '<div class="text-right">' +
@@ -237,6 +367,7 @@ document.getElementById('btn-clear-bet').addEventListener('click', function () {
 });
 
 document.getElementById('btn-action-raise').addEventListener('click', function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-raise').disabled) return;
   showRaisePanel();
 });
@@ -255,6 +386,7 @@ document.getElementById('btn-raise-back').addEventListener('click', function () 
 // ---------- 6. CONFIRMAR O AUMENTO ----------
 
 document.getElementById('btn-confirm-bet').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (currentBet <= 0) return;
 
   const betAmount = currentBet;
@@ -287,12 +419,15 @@ document.getElementById('btn-confirm-bet').addEventListener('click', async funct
   pendingBetChips = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
   renderChipsUI();
   showActionsPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
 
 // ---------- 7. COBRIR APOSTA (CALL) ----------
 
 document.getElementById('btn-action-call').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-call').disabled) return;
   if (currentCallAmount <= 0) return;
 
@@ -321,12 +456,15 @@ document.getElementById('btn-action-call').addEventListener('click', async funct
   lastKnownChips = newChips;
   renderChipsUI();
   renderActionPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
 
 // ---------- 8. ALL-IN ----------
 
 document.getElementById('btn-action-allin').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-allin').disabled) return;
 
   const me = playersCache.find(function (p) { return p.id === myPlayerId; });
@@ -356,12 +494,17 @@ document.getElementById('btn-action-allin').addEventListener('click', async func
   lastKnownChips = newChips;
   renderChipsUI();
   renderActionPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
 
 // ---------- 9. DESISTIR (FOLD) ----------
 
 document.getElementById('btn-action-fold').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
+
+  const wasFolded = hasFolded;
   hasFolded = !hasFolded;
 
   const foldBtn = document.getElementById('btn-action-fold');
@@ -371,6 +514,46 @@ document.getElementById('btn-action-fold').addEventListener('click', async funct
     .from('players')
     .update({ folded: hasFolded })
     .eq('id', myPlayerId);
+
+  // Só passa a vez quando a ação foi DESISTIR de verdade — "voltar pra
+  // rodada" (un-fold) só é alcançável, na prática, enquanto ainda é sua
+  // vez, o que só volta a acontecer na próxima mão (fold é resetado ao
+  // "Entregar Pote"). Não faz sentido passar o turno nesse caso.
+  if (hasFolded && !wasFolded) {
+    await advanceTurnAfterMyAction({ folded: true });
+  }
+});
+
+
+// ---------- 9B. INICIAR MÃO (só o Host, só quando não há mão em andamento) ----------
+
+document.getElementById('btn-start-hand').addEventListener('click', async function () {
+  if (!isHost) return;
+
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  if (occupiedSeats.length === 0) return;
+
+  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
+  const firstToActSeat = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+
+  const btn = document.getElementById('btn-start-hand');
+  btn.disabled = true;
+  btn.textContent = 'Iniciando...';
+
+  await supabaseClient
+    .from('rooms')
+    .update({ dealer_seat: newDealerSeat, current_turn_seat: firstToActSeat })
+    .eq('id', roomCode);
+
+  dealerSeat = newDealerSeat;
+  currentTurnSeat = firstToActSeat;
+
+  btn.disabled = false;
+  btn.textContent = 'Iniciar Mão';
+
+  renderHostUI();
+  renderLeaderboard(playersCache);
+  renderActionPanel();
 });
 
 
@@ -438,11 +621,27 @@ document.getElementById('btn-give-pot').addEventListener('click', async function
       .eq('id', p.id);
   }));
 
-  // Encerra a rodada: zera o pote E libera "Cobrar Antes" de novo pra próxima.
+  // Gira o botão do Dealer e calcula quem age primeiro na PRÓXIMA mão
+  // (regra oficial: à esquerda do Big Blind; heads-up: o próprio
+  // Dealer, ver js/turn.js).
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
+  const nextHandTurn = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+
+  // Encerra a rodada: zera o pote, libera "Cobrar Antes" de novo e já
+  // deixa a mesa pronta pra próxima mão.
   await supabaseClient
     .from('rooms')
-    .update({ pot: 0, ante_collected: false })
+    .update({
+      pot: 0,
+      ante_collected: false,
+      dealer_seat: newDealerSeat,
+      current_turn_seat: nextHandTurn
+    })
     .eq('id', roomCode);
+
+  dealerSeat = newDealerSeat;
+  currentTurnSeat = nextHandTurn;
 
   hasFolded = false;
   document.getElementById('btn-action-fold').querySelector('span').textContent = 'Desistir';
@@ -450,6 +649,7 @@ document.getElementById('btn-give-pot').addEventListener('click', async function
 
   anteCollected = false;
   renderHostUI();
+  renderLeaderboard(playersCache);
 });
 
 
@@ -493,9 +693,26 @@ async function handleKickPlayer(playerId, playerName) {
   const confirmed = confirm('Expulsar ' + playerName + ' da sala? Essa ação não pode ser desfeita.');
   if (!confirmed) return;
 
+  const kickedPlayer = playersCache.find(function (p) { return p.id === playerId; });
+
   await supabaseClient.from('players').delete().eq('id', playerId);
   // O placar de todo mundo (inclusive o da vítima, que será chutada pro
   // lobby) se atualiza sozinho via Realtime — ver refreshPlayers().
+
+  // Se o expulso era exatamente quem estava com a vez, a mesa ficaria
+  // travada esperando um turno que nunca mais vai acontecer — avança
+  // manualmente pro próximo assento ativo.
+  if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
+    const remaining = playersCache.filter(function (p) { return p.id !== playerId; });
+    const occupiedSeats = getOccupiedSeats(remaining);
+    const activeSeats = getActiveSeats(remaining);
+    const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
+
+    if (nextSeat !== null) {
+      currentTurnSeat = nextSeat;
+      await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+    }
+  }
 }
 
 
@@ -675,10 +892,14 @@ async function refreshRoomInfo() {
   potTotal = room.pot;
   anteCollected = room.ante_collected;
   allowKick = room.allow_kick;
+  dealerSeat = room.dealer_seat;
+  currentTurnSeat = room.current_turn_seat;
 
   renderRoomCodeUI();
   renderPotUI();
   renderHostUI();
+  renderLeaderboard(playersCache);
+  renderActionPanel();
 }
 
 function subscribeToRoom() {
@@ -697,11 +918,14 @@ function subscribeToRoom() {
         joinCode = payload.new.join_code;
         anteCollected = payload.new.ante_collected;
         allowKick = payload.new.allow_kick;
+        dealerSeat = payload.new.dealer_seat;
+        currentTurnSeat = payload.new.current_turn_seat;
 
         renderPotUI();
         renderRoomCodeUI();
         renderHostUI();
-        renderLeaderboard(playersCache); // reflete allowKick (mostra/some os botões "expulsar")
+        renderLeaderboard(playersCache); // reflete allowKick e o turno atual
+        renderActionPanel();             // reflete o turno atual pra mim
       }
     )
     .subscribe();

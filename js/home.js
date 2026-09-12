@@ -33,6 +33,23 @@ function goToPage(session, page) {
   window.location.href = page;
 }
 
+// Assento fixo (1, 2, 3...) atribuído ao entrar na sala — usado pelo
+// controle de turnos em partida.js. Independe da ordem de chegada
+// (joined_at): uma vez atribuído, o número do assento nunca muda,
+// mesmo que jogadores anteriores saiam da mesa.
+async function getNextSeatNumber(roomId) {
+  const { data } = await supabaseClient
+    .from('players')
+    .select('seat_number')
+    .eq('room_code', roomId);
+
+  const usedSeats = (data || [])
+    .map(function (p) { return p.seat_number; })
+    .filter(function (n) { return typeof n === 'number'; });
+
+  return usedSeats.length === 0 ? 1 : Math.max.apply(null, usedSeats) + 1;
+}
+
 
 // ---------- Criar sala ----------
 
@@ -59,9 +76,10 @@ document.getElementById('btn-create-room').addEventListener('click', async funct
     return;
   }
 
+  // O host é sempre o primeiro a se sentar — assento 1.
   const { data: playerRow, error: playerError } = await supabaseClient
     .from('players')
-    .insert({ room_code: newCode, name: name, chips: 1000, is_host: true })
+    .insert({ room_code: newCode, name: name, chips: 1000, is_host: true, seat_number: 1 })
     .select()
     .single();
 
@@ -118,9 +136,11 @@ document.getElementById('btn-join-room').addEventListener('click', async functio
     return;
   }
 
+  const seatNumber = await getNextSeatNumber(roomRow.id);
+
   const { data: playerRow, error: playerError } = await supabaseClient
     .from('players')
-    .insert({ room_code: roomRow.id, name: name, chips: roomRow.starting_chips, is_host: false })
+    .insert({ room_code: roomRow.id, name: name, chips: roomRow.starting_chips, is_host: false, seat_number: seatNumber })
     .select()
     .single();
 
