@@ -1,25 +1,19 @@
-// ===========================================================
-// GhostStackPoker — js/partida.js
-// Lógica da Tela 2 (Mesa): placar em tempo real, painel de ação
-// (Call/Raise/All-in/Fold), fichas visuais, e — a partir da Fase 4 —
-// permissões de Host: Entregar Pote, Cobrar Antes, gerar novo código
-// e transferência obrigatória de Host ao sair.
-// ===========================================================
-
 import { supabaseClient } from './supabase.js';
 import { loadSession, saveSession, clearSession } from './session.js';
 import { generateRoomCode } from './room-code.js';
 import {
   initialChipCounts,
   chipValues,
-  calculateStackTotal,
   formatMoney,
-  addChipsFromAmount,
-  removeChipsForAmount
+  buildChipCountsForTotal
 } from './chips.js';
-
-
-// ---------- 1. SESSÃO: quem sou eu e em qual sala eu estou ----------
+import {
+  getOccupiedSeats,
+  getActiveSeats,
+  getNextTurnSeat,
+  computeNextDealerSeat,
+  computeBlindSeats
+} from './turn.js';
 
 const session = loadSession();
 
@@ -28,17 +22,11 @@ if (!session) {
   throw new Error('Sem sessão ativa — redirecionando para o lobby.');
 }
 
-const roomCode = session.roomCode;   // id interno e estável da sala (NUNCA muda)
+const roomCode = session.roomCode;
 const myPlayerId = session.playerId;
 const myName = session.playerName;
 
-// "isHost" pode mudar durante a partida (transferência de host), por
-// isso é "let" e não "const" — e sempre que mudar, sincronizamos de
-// volta pro sessionStorage com saveSession().
 let isHost = session.isHost;
-
-
-// ---------- 2. ESTADO ----------
 
 let myChipCounts = { ...initialChipCounts };
 let pendingBetChips = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
@@ -46,17 +34,16 @@ let currentBet = 0;
 let potTotal = 0;
 let hasFolded = false;
 let currentCallAmount = 0;
-let lastKnownChips = 1000;
 let playersCache = [];
 let realtimeChannel = null;
 
-let joinCode = '------';     // código público (mostrado na tela, pode ser regenerado)
-let anteCollected = false;   // controla se "Cobrar Antes" já foi usado nesta rodada
-let allowKick = false;       // configurado pelo host em host-config.html
-let selectedNewHostId = null; // usado no modal de transferência de host
+let joinCode = '------';
+let anteCollected = false;
+let allowKick = false;
+let selectedNewHostId = null;
 
-
-// ---------- 3. FUNÇÕES DE RENDER (tudo que toca o DOM) ----------
+let dealerSeat = null;
+let currentTurnSeat = null;
 
 function renderChipsUI() {
   for (const color in myChipCounts) {
@@ -80,15 +67,61 @@ function renderRoomCodeUI() {
   document.getElementById('room-code-display').textContent = joinCode;
 }
 
-// Mostra/esconde tudo que só o Host pode ver ou fazer. Chamada sempre
-// que "isHost", "anteCollected" ou os dados do jogador mudarem.
+function getMySeatNumber() {
+  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+  return me ? me.seat_number : null;
+}
+
+function isMyTurn() {
+  const mySeat = getMySeatNumber();
+  return mySeat !== null && mySeat !== undefined && mySeat === currentTurnSeat;
+}
+
+function getCurrentTurnPlayer() {
+  return playersCache.find(function (p) { return p.seat_number === currentTurnSeat; }) || null;
+}
+
+function getFirstToActSeat() {
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  return computeBlindSeats(occupiedSeats, dealerSeat).firstToActSeat;
+}
+
+function buildProjectedPlayers(overrides) {
+  return playersCache.map(function (p) {
+    if (p.id !== myPlayerId) return p;
+    return Object.assign({}, p, overrides);
+  });
+}
+
+async function advanceTurnAfterMyAction(overrides) {
+  const mySeat = getMySeatNumber();
+  if (mySeat === null || mySeat === undefined) return;
+
+  const projected = buildProjectedPlayers(overrides);
+  const occupiedSeats = getOccupiedSeats(projected);
+  const activeSeats = getActiveSeats(projected);
+
+  const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, mySeat);
+  if (nextSeat === null) return;
+
+  currentTurnSeat = nextSeat;
+  renderLeaderboard(playersCache);
+  renderActionPanel();
+  renderHostUI();
+
+  await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+}
+
 function renderHostUI() {
   document.getElementById('btn-generate-code').classList.toggle('hidden', !isHost);
   document.getElementById('panel-give-pot').classList.toggle('hidden', !isHost);
 
-  // "Cobrar Antes" some assim que é usado, e só volta depois que o
-  // Host entrega o pote (o que encerra a rodada).
-  const showAnteBtn = isHost && !anteCollected;
+  const handInProgress = currentTurnSeat !== null && currentTurnSeat !== undefined;
+
+  document.getElementById('btn-start-hand').classList.toggle('hidden', !(isHost && !handInProgress));
+
+  const isFirstTurnOfHand = handInProgress && currentTurnSeat === getFirstToActSeat();
+  const showAnteBtn = isHost && !anteCollected && isFirstTurnOfHand;
   document.getElementById('btn-force-ante').classList.toggle('hidden', !showAnteBtn);
 }
 
@@ -100,8 +133,13 @@ function getMaxTableBet() {
   return max;
 }
 
+// FONTE DA VERDADE: sempre lê "chips" da última cópia do banco
+// (playersCache), nunca da carteira visual (myChipCounts). Toda decisão
+// de jogo (habilitar Call/Raise/All-in, valor do All-in, "Suas fichas")
+// passa por aqui — assim nenhuma delas pode divergir do Supabase.
 function getMyStackTotal() {
-  return calculateStackTotal(myChipCounts);
+  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+  return me ? me.chips : 0;
 }
 
 function renderActionPanel() {
@@ -125,6 +163,32 @@ function renderActionPanel() {
   callBtn.disabled = myStack < currentCallAmount;
   raiseBtn.disabled = myStack <= currentCallAmount;
   allinBtn.disabled = myStack <= 0;
+
+  const myTurn = isMyTurn();
+  const grid = document.getElementById('action-buttons-grid');
+  const statusLabel = document.getElementById('turn-status-label');
+  const waitingMsg = document.getElementById('turn-waiting-message');
+  const waitingName = document.getElementById('turn-waiting-name');
+
+  grid.classList.toggle('hidden', !myTurn);
+  statusLabel.classList.toggle('hidden', !myTurn);
+  waitingMsg.classList.toggle('hidden', myTurn);
+
+  if (!myTurn) {
+    const turnPlayer = getCurrentTurnPlayer();
+    waitingName.textContent = turnPlayer ? turnPlayer.name : 'outro jogador';
+
+    const raisePanel = document.getElementById('panel-raise');
+    if (!raisePanel.classList.contains('hidden')) {
+      for (const color in pendingBetChips) {
+        myChipCounts[color] += pendingBetChips[color];
+        pendingBetChips[color] = 0;
+      }
+      currentBet = 0;
+      renderChipsUI();
+      showActionsPanel();
+    }
+  }
 }
 
 function escapeHtml(text) {
@@ -133,7 +197,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Reconstrói toda a lista de jogadores na tela (placar) a partir do Supabase.
 function renderLeaderboard(players) {
   const listEl = document.getElementById('players-list');
   const winnerSelect = document.getElementById('select-winner');
@@ -143,26 +206,40 @@ function renderLeaderboard(players) {
 
   players.forEach(function (p) {
     const isMe = p.id === myPlayerId;
+    const isPlayersTurn = currentTurnSeat !== null && p.seat_number === currentTurnSeat;
+    const isDealer = dealerSeat !== null && p.seat_number === dealerSeat;
 
     const card = document.createElement('div');
     card.className = 'player-card flex items-center justify-between px-4 py-3' +
       (p.folded ? ' is-folded' : '') +
-      (isMe ? ' is-turn' : '');
+      (isMe ? ' is-turn' : '') +
+      (isPlayersTurn ? ' active-player-turn' : '');
 
     const statusText = p.folded ? 'desistiu' : (p.current_bet > 0 ? ('apostou ' + formatMoney(p.current_bet)) : 'aguardando');
     const statusClass = p.folded ? 'text-burgundy' : (p.current_bet > 0 ? 'text-gold/80' : 'text-cream/40');
 
-    // Botão de expulsar: só aparece pro Host, nos jogadores QUE NÃO são
-    // ele mesmo, e só se a sala permitir expulsão (definido no host-config).
+    const dealerBadgeHtml = isDealer ? '<span class="dealer-badge" title="Botão do Dealer">D</span>' : '';
+    const turnBadgeHtml = isPlayersTurn
+      ? '<span class="text-gold text-[10px] font-body font-semibold uppercase tracking-wide ml-1">● vez</span>'
+      : '';
+
     const showKick = isHost && allowKick && !isMe;
     const kickButtonHtml = showKick
-      ? '<button class="btn-kick-player text-burgundy/70 text-[10px] font-body underline ml-2" data-player-id="' + p.id + '" data-player-name="' + escapeHtml(p.name) + '">expulsar</button>'
+      ? '<button class="btn-kick-player" type="button" aria-label="Expulsar ' + escapeHtml(p.name) + '" title="Expulsar jogador" data-player-id="' + p.id + '" data-player-name="' + escapeHtml(p.name) + '">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M16 17l5-5-5-5"/>' +
+            '<path d="M21 12H9"/>' +
+            '<path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/>' +
+          '</svg>' +
+        '</button>'
       : '';
 
     card.innerHTML =
       '<div class="flex items-center gap-2">' +
         '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
         '<span class="text-cream font-body font-medium text-sm">' + escapeHtml(p.name) + (isMe ? ' (você)' : '') + (p.is_host ? ' 👑' : '') + '</span>' +
+        dealerBadgeHtml +
+        turnBadgeHtml +
       '</div>' +
       '<div class="flex items-center">' +
         '<div class="text-right">' +
@@ -174,24 +251,18 @@ function renderLeaderboard(players) {
 
     listEl.appendChild(card);
 
-    // O próprio host não aparece como opção pra "herdar o pote" contra si mesmo — na
-    // verdade ele pode sim ganhar rodadas, então mantemos todos no select do pote.
     const option = document.createElement('option');
     option.value = p.id;
     option.textContent = p.name + (isMe ? ' (você)' : '');
     winnerSelect.appendChild(option);
   });
 
-  // Liga o clique dos botões "expulsar" recém-criados.
   document.querySelectorAll('.btn-kick-player').forEach(function (btn) {
     btn.addEventListener('click', function () {
       handleKickPlayer(btn.dataset.playerId, btn.dataset.playerName);
     });
   });
 }
-
-
-// ---------- 4. NAVEGAÇÃO ENTRE OS PAINÉIS (Ações <-> Montar Aumento) ----------
 
 function showActionsPanel() {
   document.getElementById('panel-raise').classList.add('hidden');
@@ -206,11 +277,13 @@ function showRaisePanel() {
   document.getElementById('panel-actions').classList.remove('flex');
   document.getElementById('panel-raise').classList.remove('hidden');
   document.getElementById('panel-raise').classList.add('flex');
+
+  // Nunca confia na carteira visual de uma sessão anterior — reconstrói
+  // do zero a partir do saldo real (me.chips) sempre que o jogador abre
+  // o painel de fichas. Isso torna impossível "herdar" um valor errado.
+  myChipCounts = buildChipCountsForTotal(getMyStackTotal());
   renderChipsUI();
 }
-
-
-// ---------- 5. CLIQUE NAS FICHAS (dentro do painel de aumento) ----------
 
 document.querySelectorAll('.chip').forEach(function (chipButton) {
   chipButton.addEventListener('click', function () {
@@ -237,6 +310,7 @@ document.getElementById('btn-clear-bet').addEventListener('click', function () {
 });
 
 document.getElementById('btn-action-raise').addEventListener('click', function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-raise').disabled) return;
   showRaisePanel();
 });
@@ -251,10 +325,8 @@ document.getElementById('btn-raise-back').addEventListener('click', function () 
   showActionsPanel();
 });
 
-
-// ---------- 6. CONFIRMAR O AUMENTO ----------
-
 document.getElementById('btn-confirm-bet').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (currentBet <= 0) return;
 
   const betAmount = currentBet;
@@ -282,17 +354,16 @@ document.getElementById('btn-confirm-bet').addEventListener('click', async funct
     .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
     .eq('id', roomCode);
 
-  lastKnownChips = newChips;
   currentBet = 0;
   pendingBetChips = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
   renderChipsUI();
   showActionsPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
-
-// ---------- 7. COBRIR APOSTA (CALL) ----------
-
 document.getElementById('btn-action-call').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-call').disabled) return;
   if (currentCallAmount <= 0) return;
 
@@ -300,8 +371,6 @@ document.getElementById('btn-action-call').addEventListener('click', async funct
   const me = playersCache.find(function (p) { return p.id === myPlayerId; });
   if (!me) return;
 
-  removeChipsForAmount(myChipCounts, amount);
-
   const newChips = me.chips - amount;
   const newBet = me.current_bet + amount;
 
@@ -318,26 +387,25 @@ document.getElementById('btn-action-call').addEventListener('click', async funct
     .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
     .eq('id', roomCode);
 
-  lastKnownChips = newChips;
-  renderChipsUI();
   renderActionPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
-
-// ---------- 8. ALL-IN ----------
-
 document.getElementById('btn-action-allin').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
   if (document.getElementById('btn-action-allin').disabled) return;
 
   const me = playersCache.find(function (p) { return p.id === myPlayerId; });
   if (!me) return;
 
+  // "amount" agora vem de getMyStackTotal(), que lê me.chips (o banco) —
+  // não pode mais divergir do que o servidor considera meu saldo real.
   const amount = getMyStackTotal();
   if (amount <= 0) return;
 
-  for (const color in myChipCounts) myChipCounts[color] = 0;
+  const newChips = me.chips - amount; // sempre 0, já que amount === me.chips
 
-  const newChips = me.chips - amount;
   const newBet = me.current_bet + amount;
 
   await supabaseClient
@@ -353,15 +421,15 @@ document.getElementById('btn-action-allin').addEventListener('click', async func
     .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
     .eq('id', roomCode);
 
-  lastKnownChips = newChips;
-  renderChipsUI();
   renderActionPanel();
+
+  await advanceTurnAfterMyAction({ chips: newChips });
 });
 
-
-// ---------- 9. DESISTIR (FOLD) ----------
-
 document.getElementById('btn-action-fold').addEventListener('click', async function () {
+  if (!isMyTurn()) return;
+
+  const wasFolded = hasFolded;
   hasFolded = !hasFolded;
 
   const foldBtn = document.getElementById('btn-action-fold');
@@ -371,10 +439,40 @@ document.getElementById('btn-action-fold').addEventListener('click', async funct
     .from('players')
     .update({ folded: hasFolded })
     .eq('id', myPlayerId);
+
+  if (hasFolded && !wasFolded) {
+    await advanceTurnAfterMyAction({ folded: true });
+  }
 });
 
+document.getElementById('btn-start-hand').addEventListener('click', async function () {
+  if (!isHost) return;
 
-// ---------- 10. COBRAR ANTES (só o Host vê este botão) ----------
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  if (occupiedSeats.length === 0) return;
+
+  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
+  const firstToActSeat = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+
+  const btn = document.getElementById('btn-start-hand');
+  btn.disabled = true;
+  btn.textContent = 'Iniciando...';
+
+  await supabaseClient
+    .from('rooms')
+    .update({ dealer_seat: newDealerSeat, current_turn_seat: firstToActSeat })
+    .eq('id', roomCode);
+
+  dealerSeat = newDealerSeat;
+  currentTurnSeat = firstToActSeat;
+
+  btn.disabled = false;
+  btn.textContent = 'Iniciar Mão';
+
+  renderHostUI();
+  renderLeaderboard(playersCache);
+  renderActionPanel();
+});
 
 document.getElementById('btn-force-ante').addEventListener('click', async function () {
   if (!isHost) return;
@@ -406,9 +504,6 @@ document.getElementById('btn-force-ante').addEventListener('click', async functi
   renderHostUI();
 });
 
-
-// ---------- 11. ENTREGAR POTE AO VENCEDOR (só o Host vê este painel) ----------
-
 document.getElementById('btn-give-pot').addEventListener('click', async function () {
   if (!isHost) return;
 
@@ -438,11 +533,22 @@ document.getElementById('btn-give-pot').addEventListener('click', async function
       .eq('id', p.id);
   }));
 
-  // Encerra a rodada: zera o pote E libera "Cobrar Antes" de novo pra próxima.
+  const occupiedSeats = getOccupiedSeats(playersCache);
+  const newDealerSeat = computeNextDealerSeat(occupiedSeats, dealerSeat);
+  const nextHandTurn = computeBlindSeats(occupiedSeats, newDealerSeat).firstToActSeat;
+
   await supabaseClient
     .from('rooms')
-    .update({ pot: 0, ante_collected: false })
+    .update({
+      pot: 0,
+      ante_collected: false,
+      dealer_seat: newDealerSeat,
+      current_turn_seat: nextHandTurn
+    })
     .eq('id', roomCode);
+
+  dealerSeat = newDealerSeat;
+  currentTurnSeat = nextHandTurn;
 
   hasFolded = false;
   document.getElementById('btn-action-fold').querySelector('span').textContent = 'Desistir';
@@ -450,10 +556,8 @@ document.getElementById('btn-give-pot').addEventListener('click', async function
 
   anteCollected = false;
   renderHostUI();
+  renderLeaderboard(playersCache);
 });
-
-
-// ---------- 12. GERAR NOVO CÓDIGO (anti-troll, só o Host) ----------
 
 document.getElementById('btn-generate-code').addEventListener('click', async function () {
   if (!isHost) return;
@@ -461,8 +565,6 @@ document.getElementById('btn-generate-code').addEventListener('click', async fun
   const btn = document.getElementById('btn-generate-code');
   btn.textContent = 'gerando...';
 
-  // O "id" da sala (roomCode) NUNCA muda — só trocamos o join_code
-  // público. Assim quem já está na mesa nem percebe a troca.
   let success = false;
   let attempts = 0;
 
@@ -485,21 +587,27 @@ document.getElementById('btn-generate-code').addEventListener('click', async fun
   if (!success) alert('Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.');
 });
 
-
-// ---------- 13. EXPULSAR JOGADOR (só o Host, se a sala permitir) ----------
-
 async function handleKickPlayer(playerId, playerName) {
   if (!isHost || !allowKick) return;
   const confirmed = confirm('Expulsar ' + playerName + ' da sala? Essa ação não pode ser desfeita.');
   if (!confirmed) return;
 
+  const kickedPlayer = playersCache.find(function (p) { return p.id === playerId; });
+
   await supabaseClient.from('players').delete().eq('id', playerId);
-  // O placar de todo mundo (inclusive o da vítima, que será chutada pro
-  // lobby) se atualiza sozinho via Realtime — ver refreshPlayers().
+
+  if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
+    const remaining = playersCache.filter(function (p) { return p.id !== playerId; });
+    const occupiedSeats = getOccupiedSeats(remaining);
+    const activeSeats = getActiveSeats(remaining);
+    const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
+
+    if (nextSeat !== null) {
+      currentTurnSeat = nextSeat;
+      await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+    }
+  }
 }
-
-
-// ---------- 14. MODAL DE REGRAS ----------
 
 const rulesModal = document.getElementById('modal-rules');
 
@@ -520,9 +628,6 @@ rulesModal.addEventListener('click', function (event) {
   if (event.target === rulesModal) closeRulesModal();
 });
 
-
-// ---------- 15. SAIR DA SALA (com transferência de Host obrigatória) ----------
-
 const transferModal = document.getElementById('modal-transfer-host');
 const transferList = document.getElementById('transfer-host-list');
 const transferIntro = document.getElementById('transfer-host-intro');
@@ -536,7 +641,6 @@ function openTransferModal() {
   const others = playersCache.filter(function (p) { return p.id !== myPlayerId; });
 
   if (others.length === 0) {
-    // Ninguém pra herdar o cargo — sair encerra a sala pra todo mundo.
     transferIntro.textContent = 'Você é o único jogador na mesa. Sair vai encerrar a sala.';
     transferList.innerHTML = '';
     btnConfirmTransfer.disabled = false;
@@ -579,15 +683,11 @@ document.getElementById('btn-cancel-transfer').addEventListener('click', closeTr
 
 document.getElementById('link-leave-room').addEventListener('click', function (event) {
   if (isHost) {
-    // O Host não pode simplesmente sumir — precisa escolher um sucessor
-    // (ou encerrar a sala, se estiver sozinho).
     event.preventDefault();
     openTransferModal();
   } else {
-    // Jogador comum: sai livremente, sem restrição.
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
     clearSession();
-    // deixa o navegador seguir o link normalmente até home.html
   }
 });
 
@@ -598,10 +698,8 @@ btnConfirmTransfer.addEventListener('click', async function () {
   if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
 
   if (selectedNewHostId === null) {
-    // Estava sozinho na sala: encerra tudo (apagar a sala cascade-deleta os jogadores).
     await supabaseClient.from('rooms').delete().eq('id', roomCode);
   } else {
-    // Promove o escolhido e remove o host atual.
     await supabaseClient.from('players').update({ is_host: true }).eq('id', selectedNewHostId);
     await supabaseClient.from('rooms').update({ host_id: selectedNewHostId }).eq('id', roomCode);
     await supabaseClient.from('players').delete().eq('id', myPlayerId);
@@ -610,9 +708,6 @@ btnConfirmTransfer.addEventListener('click', async function () {
   clearSession();
   window.location.href = 'home.html';
 });
-
-
-// ---------- 16. REALTIME: buscar jogadores/sala e ouvir mudanças ----------
 
 async function refreshPlayers() {
   const { data, error } = await supabaseClient
@@ -626,7 +721,6 @@ async function refreshPlayers() {
   const me = data.find(function (p) { return p.id === myPlayerId; });
 
   if (!me) {
-    // Meu registro sumiu do banco — só acontece se o Host me expulsou.
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
     clearSession();
     alert('Você foi removido desta sala pelo host.');
@@ -637,20 +731,18 @@ async function refreshPlayers() {
   playersCache = data;
   renderLeaderboard(data);
 
-  // Detecta se acabei de virar Host (transferência de cargo em tempo real).
   if (me.is_host !== isHost) {
     isHost = me.is_host;
     saveSession({ roomCode: roomCode, playerId: myPlayerId, playerName: myName, isHost: isHost });
     renderHostUI();
   }
 
-  if (me.chips !== lastKnownChips) {
-    const delta = me.chips - lastKnownChips;
-    if (delta > 0) addChipsFromAmount(myChipCounts, delta);
-    else removeChipsForAmount(myChipCounts, -delta);
-    lastKnownChips = me.chips;
-    renderChipsUI();
-  }
+  // Não existe mais nenhum "ajuste incremental" da carteira visual aqui.
+  // getMyStackTotal() já lê "me.chips" direto de playersCache (atualizado
+  // 2 linhas acima), então "Suas fichas" e as regras de Call/Raise/All-in
+  // ficam automaticamente corretas — sem depender de myChipCounts.
+  // myChipCounts só é reconstruída quando o painel de fichas abre
+  // (showRaisePanel), que é a única hora em que ela é exibida.
 
   hasFolded = me.folded;
   const foldBtn = document.getElementById('btn-action-fold');
@@ -675,10 +767,14 @@ async function refreshRoomInfo() {
   potTotal = room.pot;
   anteCollected = room.ante_collected;
   allowKick = room.allow_kick;
+  dealerSeat = room.dealer_seat;
+  currentTurnSeat = room.current_turn_seat;
 
   renderRoomCodeUI();
   renderPotUI();
   renderHostUI();
+  renderLeaderboard(playersCache);
+  renderActionPanel();
 }
 
 function subscribeToRoom() {
@@ -697,18 +793,18 @@ function subscribeToRoom() {
         joinCode = payload.new.join_code;
         anteCollected = payload.new.ante_collected;
         allowKick = payload.new.allow_kick;
+        dealerSeat = payload.new.dealer_seat;
+        currentTurnSeat = payload.new.current_turn_seat;
 
         renderPotUI();
         renderRoomCodeUI();
         renderHostUI();
-        renderLeaderboard(playersCache); // reflete allowKick (mostra/some os botões "expulsar")
+        renderLeaderboard(playersCache);
+        renderActionPanel();
       }
     )
     .subscribe();
 }
-
-
-// ---------- 17. INICIALIZAÇÃO DA PÁGINA ----------
 
 renderChipsUI();
 renderHostUI();

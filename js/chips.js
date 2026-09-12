@@ -57,9 +57,26 @@ export function addChipsFromAmount(counts, amount) {
   });
 }
 
+// Reconstrói do zero um objeto de contagem de fichas que soma exatamente
+// ao valor informado — como um caixa dando troco, sempre a partir do
+// maior valor. Diferente de addChipsFromAmount/removeChipsForAmount
+// (que ajustam um objeto EXISTENTE aos poucos, acumulando erro se o
+// objeto de origem já estiver errado), esta função nunca herda estado
+// anterior: o resultado depende só do "total" recebido.
+export function buildChipCountsForTotal(total) {
+  const counts = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
+  addChipsFromAmount(counts, total);
+  return counts;
+}
+
 // Dado um objeto de contagem de fichas (mutado por referência) e um valor em
 // dinheiro que precisa "sair" (ex: pagou o ante), remove fichas suficientes,
 // começando pela menor nota (preta) até a maior.
+// NOTA: partida.js não usa mais esta função para "reconciliar" o saldo do
+// jogador com o banco — foi exatamente esse padrão (ajustar aos poucos um
+// valor que já podia estar errado) que causava o bug de dessincronização.
+// Ela continua aqui como utilidade genérica, caso seja útil no futuro
+// (ex: visualização de fichas retiradas do pote lateral).
 export function removeChipsForAmount(counts, amount) {
   const order = ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'];
   let remaining = amount;
