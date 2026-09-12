@@ -65,8 +65,12 @@
       <div class="w-10"></div>
     </header>
 
-    <!-- Ações do dono da sala (ante) -->
-    <div class="px-5 mb-4">
+    <!-- Ações do dono da sala (iniciar mão / ante) -->
+    <div class="px-5 mb-4 flex flex-col gap-2">
+      <button id="btn-start-hand"
+        class="hidden w-full bg-gold hover:bg-gold-light text-ink font-body font-semibold text-sm py-2.5 rounded-lg">
+        Iniciar Mão
+      </button>
       <button id="btn-force-ante"
         class="hidden w-full bg-burgundy/80 hover:bg-burgundy text-cream font-body font-semibold text-sm py-2.5 rounded-lg">
         Cobrar Antes
@@ -121,7 +125,11 @@
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
+          <p id="turn-status-label" class="text-center font-body text-xs font-semibold tracking-wide uppercase text-gold">
+            Sua vez de agir
+          </p>
+
+          <div id="action-buttons-grid" class="grid grid-cols-2 gap-2">
             <button id="btn-action-call" class="action-btn bg-felt-light border border-gold/40 text-cream">
               <span class="block font-body font-semibold text-sm">Cobrir Aposta</span>
               <span id="call-amount-label" class="block text-gold text-xs font-body mt-0.5">0</span>
@@ -141,6 +149,10 @@
               <span class="block font-body font-semibold text-sm">Desistir</span>
             </button>
           </div>
+
+          <p id="turn-waiting-message" class="hidden text-center text-cream/50 text-xs font-body py-3">
+            Aguardando <span id="turn-waiting-name" class="text-gold font-semibold">—</span> jogar...
+          </p>
         </div>
 
         <!-- ===== PAINEL B: montar valor do aumento com as fichas ===== -->

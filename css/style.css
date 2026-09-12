@@ -132,6 +132,87 @@ html, body{
 
 .player-card.is-folded{ opacity: 0.45; }
 
+/* ===== Indicador de turno ativo (independente do .is-turn de "sou eu") ===== */
+.player-card.active-player-turn{
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(201,162,39,0.4), 0 0 14px rgba(201,162,39,0.25);
+  animation: turn-glow-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes turn-glow-pulse{
+  0%, 100%{ box-shadow: 0 0 0 2px rgba(201,162,39,0.4), 0 0 14px rgba(201,162,39,0.25); }
+  50%{ box-shadow: 0 0 0 2px rgba(201,162,39,0.65), 0 0 20px rgba(201,162,39,0.4); }
+}
+
+/* ===== Selo do botão do Dealer ===== */
+.dealer-badge{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: 'Fraunces', serif;
+  font-weight: 700;
+  font-size: 9px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ===== Botão de expulsar jogador (visível apenas para o host) ===== */
+.btn-kick-player{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-left: 10px;
+  padding: 0;
+  border: 1px solid rgba(196, 74, 87, 0.35);
+  border-radius: 50%;
+  background: rgba(122, 35, 49, 0.14);
+  color: #e8a0a8;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease,
+    color 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+}
+
+.btn-kick-player svg{
+  width: 15px;
+  height: 15px;
+  transition: transform 0.15s ease;
+}
+
+.btn-kick-player:hover{
+  border-color: var(--burgundy);
+  background: var(--burgundy);
+  color: var(--cream);
+  box-shadow: 0 0 0 4px rgba(122, 35, 49, 0.18), 0 4px 10px rgba(0,0,0,0.3);
+  animation: kick-shake 0.35s ease;
+}
+
+.btn-kick-player:hover svg{ transform: translateX(1px); }
+
+.btn-kick-player:focus-visible{
+  outline: 2px solid var(--gold-light);
+  outline-offset: 2px;
+}
+
+.btn-kick-player:active{
+  transform: scale(0.92);
+  box-shadow: none;
+}
+
+@keyframes kick-shake{
+  0%, 100%{ transform: rotate(0); }
+  25%{ transform: rotate(-8deg); }
+  75%{ transform: rotate(8deg); }
+}
+
 /* ===== Scrollbar discreta ===== */
 ::-webkit-scrollbar{ width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb{ background: rgba(201,162,39,0.4); border-radius: 10px; }
