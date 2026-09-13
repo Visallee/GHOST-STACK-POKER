@@ -107,16 +107,24 @@ function recalcCountsForTotal(total) {
   const counts = {};
   let runningTotal = 0;
 
+  // IMPORTANTE: usa Math.floor (nunca "arredonda pra cima") em cada
+  // denominação maior. Isso GARANTE que a soma parcial nunca ultrapassa
+  // o total pedido — o bug antigo usava Math.round em cada uma
+  // independentemente, e o excesso acumulado (ex: 500 virava 550) nunca
+  // era corrigido, porque a ficha preta só conseguia SOMAR, nunca tirar
+  // o que já tinha "estourado" antes dela.
   ['amarela', 'branca', 'verde', 'vermelha', 'azul'].forEach(function (color) {
     const value = Number(getValueInput(color).value) || defaultChipValues[color];
-    const count = Math.max(0, Math.round(defaultChipCounts[color] * ratio));
+    const count = Math.max(0, Math.floor(defaultChipCounts[color] * ratio));
     counts[color] = count;
     runningTotal += count * value;
   });
 
+  // A ficha preta (a menor) sempre absorve o restante exato — com o
+  // floor acima, "remaining" nunca fica negativo.
   const pretaValue = Number(getValueInput('preta').value) || defaultChipValues.preta;
   const remaining = total - runningTotal;
-  counts.preta = Math.max(0, Math.round(remaining / pretaValue));
+  counts.preta = pretaValue > 0 ? Math.max(0, Math.round(remaining / pretaValue)) : 0;
 
   return counts;
 }

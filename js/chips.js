@@ -44,11 +44,16 @@ export function formatMoney(value) {
 // Dado um objeto de contagem de fichas (mutado por referência) e um valor em
 // dinheiro que precisa ser "criado" (ex: o jogador ganhou o pote), distribui
 // esse valor em fichas, começando pela maior nota (amarela) até a menor.
-export function addChipsFromAmount(counts, amount) {
+//
+// "valuesMap" é opcional: se a sala tiver valores customizados pelo Host
+// (rooms.chip_values), passe eles aqui — caso contrário usa os padrões.
+export function addChipsFromAmount(counts, amount, valuesMap) {
+  const values = valuesMap || chipValues;
   const order = ['amarela', 'branca', 'verde', 'vermelha', 'azul', 'preta'];
   let remaining = amount;
   order.forEach(function (color) {
-    const val = chipValues[color];
+    const val = values[color];
+    if (!val || val <= 0) return;
     const count = Math.floor(remaining / val);
     if (count > 0) {
       counts[color] += count;
@@ -63,9 +68,9 @@ export function addChipsFromAmount(counts, amount) {
 // (que ajustam um objeto EXISTENTE aos poucos, acumulando erro se o
 // objeto de origem já estiver errado), esta função nunca herda estado
 // anterior: o resultado depende só do "total" recebido.
-export function buildChipCountsForTotal(total) {
+export function buildChipCountsForTotal(total, valuesMap) {
   const counts = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
-  addChipsFromAmount(counts, total);
+  addChipsFromAmount(counts, total, valuesMap);
   return counts;
 }
 
@@ -77,13 +82,14 @@ export function buildChipCountsForTotal(total) {
 // valor que já podia estar errado) que causava o bug de dessincronização.
 // Ela continua aqui como utilidade genérica, caso seja útil no futuro
 // (ex: visualização de fichas retiradas do pote lateral).
-export function removeChipsForAmount(counts, amount) {
+export function removeChipsForAmount(counts, amount, valuesMap) {
+  const values = valuesMap || chipValues;
   const order = ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'];
   let remaining = amount;
   order.forEach(function (color) {
-    while (remaining > 0 && counts[color] > 0 && chipValues[color] <= remaining) {
+    while (remaining > 0 && counts[color] > 0 && values[color] <= remaining) {
       counts[color] -= 1;
-      remaining -= chipValues[color];
+      remaining -= values[color];
     }
   });
   // Caso não sobre uma combinação exata (raro), força a remoção do que tiver disponível.
@@ -91,7 +97,7 @@ export function removeChipsForAmount(counts, amount) {
     for (const color of ['branca', 'amarela', 'verde', 'vermelha', 'azul', 'preta']) {
       while (remaining > 0 && counts[color] > 0) {
         counts[color] -= 1;
-        remaining -= chipValues[color];
+        remaining -= values[color];
       }
       if (remaining <= 0) break;
     }

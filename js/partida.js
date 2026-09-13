@@ -54,6 +54,12 @@ let currentRound = 0;
 let gameStatus = 'in_progress';   // 'in_progress' ou 'finished'
 let startingChips = 1000;         // usado pelo rebuy (Fase 4) pra saber com quanto o jogador volta
 
+// Configuração de fichas DESTA sala (definida pelo Host em host-config.html).
+// Começam com os padrões só como fallback de segurança — o valor real vem
+// do banco assim que refreshRoomInfo() rodar pela primeira vez.
+let roomChipValues = { ...chipValues };
+let roomInitialChipCounts = { ...initialChipCounts };
+
 function renderChipsUI() {
   for (const color in myChipCounts) {
     const counter = document.querySelector(`[data-count-for="${color}"]`);
@@ -393,10 +399,19 @@ function showRaisePanel() {
   document.getElementById('panel-raise').classList.remove('hidden');
   document.getElementById('panel-raise').classList.add('flex');
 
-  // Nunca confia na carteira visual de uma sessão anterior — reconstrói
-  // do zero a partir do saldo real (me.chips) sempre que o jogador abre
-  // o painel de fichas. Isso torna impossível "herdar" um valor errado.
-  myChipCounts = buildChipCountsForTotal(getMyStackTotal());
+  // Se o jogador ainda tem o saldo INTEIRO (acabou de entrar, ou acabou
+  // de "Jogar Novamente"), usa a distribuição EXATA que o Host configurou
+  // — não uma reconstrução genérica, que podia dar uma combinação
+  // diferente da que ele escolheu (isso era o bug 1/3/8: o jogo sempre
+  // "inventava" uma distribuição própria, ignorando a da sala).
+  // Fora desse caso (já apostou/ganhou fichas em algum momento), não tem
+  // como saber a distribuição "certa" pro valor atual — aí sim reconstrói
+  // usando os VALORES de ficha da sala (roomChipValues), nunca os padrões.
+  const myTotal = getMyStackTotal();
+  myChipCounts = (myTotal === startingChips)
+    ? { ...roomInitialChipCounts }
+    : buildChipCountsForTotal(myTotal, roomChipValues);
+
   renderChipsUI();
 }
 
@@ -810,12 +825,24 @@ async function handleKickPlayer(playerId, playerName) {
 
   const kickedPlayer = playersCache.find(function (p) { return p.id === playerId; });
 
-  await supabaseClient.from('players').delete().eq('id', playerId);
+  // Atualização otimista: some da MINHA tela na hora, sem esperar o
+  // Realtime ir e voltar (o Realtime confirma isso pra todo mundo em
+  // seguida, inclusive corrige se o delete falhar).
+  playersCache = playersCache.filter(function (p) { return p.id !== playerId; });
+  renderLeaderboard(playersCache);
+  renderGivePotPanel();
+
+  const { error } = await supabaseClient.from('players').delete().eq('id', playerId);
+
+  if (error) {
+    alert('Não foi possível expulsar: ' + error.message);
+    refreshPlayers(); // desfaz a remoção otimista, busca o estado real
+    return;
+  }
 
   if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
-    const remaining = playersCache.filter(function (p) { return p.id !== playerId; });
-    const occupiedSeats = getOccupiedSeats(remaining);
-    const activeSeats = getActiveSeats(remaining);
+    const occupiedSeats = getOccupiedSeats(playersCache);
+    const activeSeats = getActiveSeats(playersCache);
     const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
 
     if (nextSeat !== null) {
@@ -1034,6 +1061,17 @@ async function refreshRoomInfo() {
   gameStatus = room.game_status;
   startingChips = room.starting_chips;
 
+  // Usa a configuração de fichas REAL desta sala (definida pelo Host),
+  // com os padrões como fallback só se por algum motivo vier vazio.
+  roomChipValues = (room.chip_values && Object.keys(room.chip_values).length > 0)
+    ? room.chip_values
+    : { ...chipValues };
+  roomInitialChipCounts = (room.chip_counts && Object.keys(room.chip_counts).length > 0)
+    ? room.chip_counts
+    : { ...initialChipCounts };
+
+  applyRoomChipConfigToDOM();
+
   renderRoomCodeUI();
   renderPotUI();
   renderHostUI();
@@ -1044,6 +1082,23 @@ async function refreshRoomInfo() {
   // Se eu recarreguei a página (ou entrei) DEPOIS do jogo já ter
   // terminado, não faz sentido me mostrar a mesa — vai direto pro Lobby.
   redirectToLobbyIfFinished();
+}
+
+// Atualiza o valor exibido (e o data-chip-value usado nos cliques) de
+// cada botão de ficha pra bater com o que o Host configurou — sem isso,
+// os botões sempre mostravam os valores padrão (5/10/20/50/100/200),
+// não importa o que a sala tivesse configurado (bug 1/3).
+function applyRoomChipConfigToDOM() {
+  ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'].forEach(function (color) {
+    const btn = document.querySelector('.chip[data-chip-color="' + color + '"]');
+    if (!btn) return;
+
+    const value = roomChipValues[color];
+    btn.dataset.chipValue = value;
+
+    const valueLabel = btn.querySelector('.chip-value');
+    if (valueLabel) valueLabel.textContent = formatMoney(value);
+  });
 }
 
 // Chamada tanto aqui quanto no listener do Realtime (subscribeToRoom) —
