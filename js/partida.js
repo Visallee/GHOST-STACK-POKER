@@ -14,6 +14,7 @@ import {
 } from './turn.js';
 import { computeSidePots } from './pots.js';
 import { evaluateWinCondition, buildFinalResults } from './win-condition.js';
+import { getAmountToCall, validateBetAmount } from './betting.js';
 
 const session = loadSession();
 
@@ -76,6 +77,12 @@ let startingChips = 1000;         // usado pelo rebuy pra saber com quanto o jog
 // clicado, a aposta atual ultrapassaria o saldo disponível do jogador.
 // Não existe mais "quantas fichas dessa cor eu tenho": o limite é
 // sempre o dinheiro (getMyStackTotal), nunca a quantidade de botões.
+//
+// Também recalcula, a cada clique, se o valor MONTADO até agora já é
+// uma aposta VÁLIDA (regra de aposta mínima) — "Confirmar Aumento" só
+// fica habilitado quando currentBet cobre a aposta da mesa (ou é um
+// all-in do saldo inteiro). Essa é a camada de INTERFACE da validação;
+// a camada de LÓGICA (que não confia só nisso) está em btn-confirm-bet.
 function renderChipsUI() {
   const balance = getMyStackTotal();
 
@@ -88,6 +95,41 @@ function renderChipsUI() {
 
   const currentBetEl = document.getElementById('current-bet');
   if (currentBetEl) currentBetEl.textContent = formatMoney(currentBet);
+
+  // ----- Resumo financeiro do painel de aumento -----
+  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+  const alreadyBet = me ? me.current_bet : 0;
+  const maxBet = getMaxTableBet();
+  const toCall = getAmountToCall(alreadyBet, maxBet);
+
+  const balanceEl = document.getElementById('raise-balance-display');
+  const alreadyBetEl = document.getElementById('raise-already-bet-display');
+  const toCallEl = document.getElementById('raise-to-call-display');
+  const totalAfterEl = document.getElementById('raise-total-after-display');
+  const confirmBtn = document.getElementById('btn-confirm-bet');
+  const validationMsg = document.getElementById('raise-validation-message');
+
+  if (balanceEl) balanceEl.textContent = formatMoney(balance);
+  if (alreadyBetEl) alreadyBetEl.textContent = formatMoney(alreadyBet);
+  if (toCallEl) toCallEl.textContent = formatMoney(toCall);
+  if (totalAfterEl) totalAfterEl.textContent = formatMoney(alreadyBet + currentBet);
+
+  if (confirmBtn && validationMsg) {
+    if (currentBet <= 0) {
+      // Ainda não clicou em nenhuma ficha — não mostra erro, só mantém desabilitado.
+      confirmBtn.disabled = true;
+      validationMsg.classList.add('hidden');
+    } else {
+      const result = validateBetAmount(currentBet, balance, alreadyBet, maxBet);
+      confirmBtn.disabled = !result.valid;
+      if (result.valid) {
+        validationMsg.classList.add('hidden');
+      } else {
+        validationMsg.textContent = result.reason;
+        validationMsg.classList.remove('hidden');
+      }
+    }
+  }
 }
 
 function renderPotUI() {
@@ -185,12 +227,14 @@ function renderActionPanel() {
   const maxBet = getMaxTableBet();
   const myStack = getMyStackTotal();
 
-  currentCallAmount = Math.max(0, maxBet - myBet);
+  currentCallAmount = getAmountToCall(myBet, maxBet);
 
   document.getElementById('my-stack-display').textContent = formatMoney(myStack);
   document.getElementById('table-max-bet-display').textContent = formatMoney(maxBet);
   document.getElementById('call-amount-label').textContent =
     currentCallAmount > 0 ? formatMoney(currentCallAmount) : 'nada a cobrir';
+  document.getElementById('call-action-label').textContent =
+    currentCallAmount > 0 ? 'Cobrir Aposta' : 'Passar';
   document.getElementById('allin-amount-label').textContent = formatMoney(myStack);
 
   const callBtn = document.getElementById('btn-action-call');
@@ -460,6 +504,19 @@ document.getElementById('btn-confirm-bet').addEventListener('click', function ()
     const me = playersCache.find(function (p) { return p.id === myPlayerId; });
     if (!me) return;
 
+    // VALIDAÇÃO DE LÓGICA (regra de aposta mínima) — não confia só no
+    // botão estar desabilitado na interface. Isso impede, por exemplo,
+    // que um estado de tela desatualizado (ex: a mesa mudou de valor
+    // entre o último clique e a confirmação) deixe passar uma aposta
+    // menor que o necessário pra cobrir.
+    const maxBet = getMaxTableBet();
+    const validation = validateBetAmount(betAmount, getMyStackTotal(), me.current_bet, maxBet);
+    if (!validation.valid) {
+      alert(validation.reason);
+      renderChipsUI(); // atualiza a mensagem/estado do botão na tela também
+      return;
+    }
+
     const newChips = me.chips - betAmount;
     const newBet = me.current_bet + betAmount;
 
@@ -494,11 +551,30 @@ document.getElementById('btn-action-call').addEventListener('click', function ()
   runGuardedAction(button, async function () {
     if (!isMyTurn()) return;
     if (button.disabled) return;
-    if (currentCallAmount <= 0) return;
+
+    // Se não há nada a cobrir (ninguém apostou mais que eu nesta
+    // rodada), este botão funciona como "passar a vez" — não mexe em
+    // saldo nenhum, só avança o turno. Antes, isso simplesmente não
+    // fazia nada e travava o jogo (uma das causas do "turno preso").
+    if (currentCallAmount <= 0) {
+      await advanceTurnAfterMyAction({});
+      return;
+    }
 
     const amount = currentCallAmount;
     const me = playersCache.find(function (p) { return p.id === myPlayerId; });
     if (!me) return;
+
+    // Validação de lógica: um Call sempre resulta em current_bet ===
+    // maxBet por construção (amount = currentCallAmount), então isso é
+    // sempre válido — mas confere mesmo assim, por consistência com a
+    // regra de nunca confiar só na interface.
+    const maxBet = getMaxTableBet();
+    const validation = validateBetAmount(amount, getMyStackTotal(), me.current_bet, maxBet);
+    if (!validation.valid) {
+      alert(validation.reason);
+      return;
+    }
 
     const newChips = me.chips - amount;
     const newBet = me.current_bet + amount;

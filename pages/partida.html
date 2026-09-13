@@ -120,7 +120,7 @@
 
           <div id="action-buttons-grid" class="grid grid-cols-2 gap-2">
             <button id="btn-action-call" class="action-btn bg-felt-light border border-gold/40 text-cream">
-              <span class="block font-body font-semibold text-sm">Cobrir Aposta</span>
+              <span id="call-action-label" class="block font-body font-semibold text-sm">Cobrir Aposta</span>
               <span id="call-amount-label" class="block text-gold text-xs font-body mt-0.5">0</span>
             </button>
 
@@ -161,18 +161,38 @@
         <!-- ===== PAINEL B: montar valor do aumento com as fichas ===== -->
         <div id="panel-raise" class="hidden flex-col gap-0">
 
-          <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center justify-between mb-2">
             <button id="btn-raise-back" class="text-cream/70 font-body text-xs flex items-center gap-1">
               ← Voltar
             </button>
             <div class="text-right">
-              <p class="text-cream/50 text-[11px] font-body">Valor do aumento</p>
+              <p class="text-cream/50 text-[11px] font-body">Adicionando agora</p>
               <p id="current-bet" class="font-display text-cream text-2xl leading-none">0</p>
             </div>
           </div>
 
+          <!-- Resumo financeiro: saldo, já apostado, quanto falta pra cobrir, total após -->
+          <div class="grid grid-cols-2 gap-2 mb-3">
+            <div class="bg-black/20 rounded-lg p-2 text-center">
+              <p id="raise-balance-display" class="font-display text-cream text-base leading-none">0</p>
+              <p class="text-cream/40 text-[9px] font-body mt-1 uppercase tracking-wide">Saldo disponível</p>
+            </div>
+            <div class="bg-black/20 rounded-lg p-2 text-center">
+              <p id="raise-already-bet-display" class="font-display text-cream text-base leading-none">0</p>
+              <p class="text-cream/40 text-[9px] font-body mt-1 uppercase tracking-wide">Já apostado</p>
+            </div>
+            <div class="bg-black/20 rounded-lg p-2 text-center">
+              <p id="raise-to-call-display" class="font-display text-burgundy text-base leading-none">0</p>
+              <p class="text-cream/40 text-[9px] font-body mt-1 uppercase tracking-wide">Para cobrir</p>
+            </div>
+            <div class="bg-black/20 rounded-lg p-2 text-center">
+              <p id="raise-total-after-display" class="font-display text-gold text-base leading-none">0</p>
+              <p class="text-cream/40 text-[9px] font-body mt-1 uppercase tracking-wide">Total após confirmar</p>
+            </div>
+          </div>
+
           <!-- Fichas do jogador -->
-          <div class="grid grid-cols-6 gap-2 justify-items-center mb-3">
+          <div class="grid grid-cols-6 gap-2 justify-items-center mb-2">
 
             <div class="chip-wrap">
               <button class="chip chip-preta" data-chip-value="5" data-chip-color="preta">
@@ -212,13 +232,15 @@
 
           </div>
 
+          <p id="raise-validation-message" class="hidden text-burgundy text-[11px] font-body text-center mb-2"></p>
+
           <div class="flex gap-2">
             <button id="btn-clear-bet"
               class="flex-1 border border-cream/25 text-cream/80 font-body text-sm font-medium py-2.5 rounded-lg">
               Limpar
             </button>
-            <button id="btn-confirm-bet"
-              class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg">
+            <button id="btn-confirm-bet" disabled
+              class="flex-1 bg-gold text-ink font-body text-sm font-semibold py-2.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">
               Confirmar Aumento
             </button>
           </div>
