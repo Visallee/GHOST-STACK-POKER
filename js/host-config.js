@@ -1,13 +1,18 @@
 // ===========================================================
 // GhostStackPoker — js/host-config.js
-// Lógica da tela exclusiva do Host: definir regras da sala, saldo
-// inicial e a distribuição de fichas antes de "abrir a mesa" pros
-// convidados. Só quem criou a sala (isHost: true na sessão) chega aqui.
+// Lógica da tela exclusiva do Host: definir regras da sala e o saldo
+// inicial antes de "abrir a mesa" pros convidados. Só quem criou a
+// sala (isHost: true na sessão) chega aqui.
+//
+// MUDANÇA DE ARQUITETURA: a "Configuração Avançada de Fichas" (valor e
+// quantidade de cada cor) foi REMOVIDA. O jogo não representa mais
+// fichas físicas — só saldo em dinheiro (players.chips). O Host agora
+// só define o Saldo Inicial; os botões de aposta na mesa têm valores
+// fixos (ver js/chips.js).
 // ===========================================================
 
 import { supabaseClient } from './supabase.js';
-import { loadSession, saveSession, clearSession } from './session.js';
-import { chipValues as defaultChipValues, initialChipCounts as defaultChipCounts } from './chips.js';
+import { loadSession, clearSession } from './session.js';
 
 
 // ---------- 1. SESSÃO: só o Host pode estar aqui ----------
@@ -25,25 +30,14 @@ const roomCode = session.roomCode;
 const myPlayerId = session.playerId;
 
 
-// ---------- 2. ESTADO ----------
-
-// true assim que o host mexer manualmente em qualquer campo de
-// "Configurações avançadas" — a partir daí o slider para de
-// sobrescrever os valores automaticamente.
-let advancedManuallyEdited = false;
-
-
-// ---------- 3. ELEMENTOS ----------
+// ---------- 2. ELEMENTOS ----------
 
 const slider = document.getElementById('slider-starting-chips');
 const startingChipsDisplay = document.getElementById('starting-chips-display');
-const advancedTotalDisplay = document.getElementById('advanced-total-display');
-const advancedWarning = document.getElementById('advanced-warning');
 const btnOpenTable = document.getElementById('btn-open-table');
 
-const colors = ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'];
 
-// ---------- CONDIÇÃO DE VITÓRIA ----------
+// ---------- 3. CONDIÇÃO DE VITÓRIA ----------
 
 let winCondition = 'elimination'; // 'elimination' ou 'round_limit'
 
@@ -81,100 +75,17 @@ function formatMoney(value) {
   return value.toLocaleString('pt-BR');
 }
 
-function getValueInput(color) {
-  return document.querySelector(`.chip-config-value[data-color="${color}"]`);
-}
-function getCountInput(color) {
-  return document.querySelector(`.chip-config-count[data-color="${color}"]`);
-}
-
-// Lê os 12 campos (6 valores + 6 quantidades) do formulário.
-function readAdvancedConfig() {
-  const values = {};
-  const counts = {};
-  colors.forEach(function (color) {
-    values[color] = Math.max(1, Number(getValueInput(color).value) || 0);
-    counts[color] = Math.max(0, Number(getCountInput(color).value) || 0);
-  });
-  return { values, counts };
-}
-
-// Dado um total-alvo, recalcula a QUANTIDADE de cada ficha proporcional
-// à distribuição oficial (mantendo o "valor" de cada cor como está),
-// sempre batendo exatamente no total (a ficha preta absorve o resto).
-function recalcCountsForTotal(total) {
-  const ratio = total / 1000;
-  const counts = {};
-  let runningTotal = 0;
-
-  // IMPORTANTE: usa Math.floor (nunca "arredonda pra cima") em cada
-  // denominação maior. Isso GARANTE que a soma parcial nunca ultrapassa
-  // o total pedido — o bug antigo usava Math.round em cada uma
-  // independentemente, e o excesso acumulado (ex: 500 virava 550) nunca
-  // era corrigido, porque a ficha preta só conseguia SOMAR, nunca tirar
-  // o que já tinha "estourado" antes dela.
-  ['amarela', 'branca', 'verde', 'vermelha', 'azul'].forEach(function (color) {
-    const value = Number(getValueInput(color).value) || defaultChipValues[color];
-    const count = Math.max(0, Math.floor(defaultChipCounts[color] * ratio));
-    counts[color] = count;
-    runningTotal += count * value;
-  });
-
-  // A ficha preta (a menor) sempre absorve o restante exato — com o
-  // floor acima, "remaining" nunca fica negativo.
-  const pretaValue = Number(getValueInput('preta').value) || defaultChipValues.preta;
-  const remaining = total - runningTotal;
-  counts.preta = pretaValue > 0 ? Math.max(0, Math.round(remaining / pretaValue)) : 0;
-
-  return counts;
-}
-
-// Recalcula o total configurado, valida contra o saldo do slider e
-// habilita/desabilita o botão "Abrir Mesa" de acordo.
-function updateAdvancedTotalAndValidation() {
-  const { values, counts } = readAdvancedConfig();
-  let total = 0;
-  colors.forEach(function (color) { total += values[color] * counts[color]; });
-
-  advancedTotalDisplay.textContent = formatMoney(total);
-
-  const target = Number(slider.value);
-  const matches = total === target;
-
-  advancedTotalDisplay.classList.toggle('text-gold', matches);
-  advancedTotalDisplay.classList.toggle('text-burgundy', !matches);
-
-  if (!matches) {
-    advancedWarning.textContent =
-      'O total configurado (' + formatMoney(total) + ') não bate com o saldo inicial escolhido (' + formatMoney(target) + '). Ajuste os valores ou clique em "Recalcular automaticamente".';
-    advancedWarning.classList.remove('hidden');
-  } else {
-    advancedWarning.classList.add('hidden');
-  }
-
-  btnOpenTable.disabled = !matches;
-  return { values, counts, total, matches };
-}
-
-// Aplica no formulário uma distribuição de quantidades já calculada.
-function applyCounts(counts) {
-  colors.forEach(function (color) {
-    getCountInput(color).value = counts[color];
-  });
-}
-
 
 // ---------- 5. SLIDER DE SALDO INICIAL (com botões -/+) ----------
+//
+// Bem mais simples agora: só ajusta o número. Não existe mais nenhuma
+// "distribuição de fichas" pra recalcular junto — os botões de aposta
+// na mesa têm valores fixos, o saldo inicial é só um número puro.
 
 function setSliderValue(value) {
   const clamped = Math.min(5000, Math.max(500, value));
   slider.value = clamped;
   startingChipsDisplay.textContent = formatMoney(clamped);
-
-  if (!advancedManuallyEdited) {
-    applyCounts(recalcCountsForTotal(clamped));
-  }
-  updateAdvancedTotalAndValidation();
 }
 
 slider.addEventListener('input', function () {
@@ -190,34 +101,7 @@ document.getElementById('btn-chips-plus').addEventListener('click', function () 
 });
 
 
-// ---------- 6. CONFIGURAÇÕES AVANÇADAS (edição manual) ----------
-
-document.querySelectorAll('.chip-config-value, .chip-config-count').forEach(function (input) {
-  input.addEventListener('input', function () {
-    advancedManuallyEdited = true;
-    updateAdvancedTotalAndValidation();
-  });
-});
-
-document.getElementById('btn-recalc-advanced').addEventListener('click', function () {
-  advancedManuallyEdited = false;
-  applyCounts(recalcCountsForTotal(Number(slider.value)));
-  updateAdvancedTotalAndValidation();
-});
-
-
-// ---------- 7. ACORDEÃO ----------
-
-const advancedBody = document.getElementById('advanced-body');
-const advancedChevron = document.getElementById('advanced-chevron');
-
-document.getElementById('btn-toggle-advanced').addEventListener('click', function () {
-  advancedBody.classList.toggle('is-open');
-  advancedChevron.classList.toggle('is-open');
-});
-
-
-// ---------- 8. ABRIR MESA ----------
+// ---------- 6. ABRIR MESA ----------
 
 function showConfigError(message) {
   const el = document.getElementById('config-error');
@@ -226,9 +110,6 @@ function showConfigError(message) {
 }
 
 btnOpenTable.addEventListener('click', async function () {
-  const { values, counts, total, matches } = updateAdvancedTotalAndValidation();
-  if (!matches) return; // botão já deveria estar desabilitado, mas confere de novo por segurança
-
   const startingChips = Number(slider.value);
   const allowKick = document.getElementById('toggle-allow-kick').checked;
   const allowDonations = document.getElementById('toggle-allow-donations').checked;
@@ -241,7 +122,9 @@ btnOpenTable.addEventListener('click', async function () {
   btnOpenTable.disabled = true;
   btnOpenTable.textContent = 'Abrindo mesa...';
 
-  // Salva todas as regras da sala.
+  // Salva as regras da sala. Note que "chip_values"/"chip_counts" não
+  // são mais enviados — essas colunas continuam existindo no banco
+  // (inofensivas, sem uso), mas o jogo não lê mais elas.
   const { error: roomError } = await supabaseClient
     .from('rooms')
     .update({
@@ -252,8 +135,6 @@ btnOpenTable.addEventListener('click', async function () {
       starting_chips: startingChips,
       max_players: maxPlayers,
       ante_amount: anteAmount,
-      chip_values: values,
-      chip_counts: counts,
       win_condition: winCondition,
       round_limit: roundLimit
     })
@@ -284,7 +165,7 @@ btnOpenTable.addEventListener('click', async function () {
 });
 
 
-// ---------- 9. CANCELAR E VOLTAR ----------
+// ---------- 7. CANCELAR E VOLTAR ----------
 
 document.getElementById('btn-cancel-room').addEventListener('click', async function () {
   const btn = document.getElementById('btn-cancel-room');
@@ -300,7 +181,7 @@ document.getElementById('btn-cancel-room').addEventListener('click', async funct
 });
 
 
-// ---------- 10. INICIALIZAÇÃO ----------
+// ---------- 8. INICIALIZAÇÃO ----------
 
 document.getElementById('room-code-display').textContent = roomCode;
 setSliderValue(1000);

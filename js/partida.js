@@ -2,10 +2,8 @@ import { supabaseClient } from './supabase.js';
 import { loadSession, saveSession, clearSession } from './session.js';
 import { generateRoomCode } from './room-code.js';
 import {
-  initialChipCounts,
-  chipValues,
-  formatMoney,
-  buildChipCountsForTotal
+  CHIP_VALUES,
+  formatMoney
 } from './chips.js';
 import {
   getOccupiedSeats,
@@ -30,9 +28,7 @@ const myName = session.playerName;
 
 let isHost = session.isHost;
 
-let myChipCounts = { ...initialChipCounts };
-let pendingBetChips = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
-let currentBet = 0;
+let currentBet = 0; // dinheiro que o jogador está "montando" pra apostar/aumentar (ainda não confirmado)
 let potTotal = 0;
 let hasFolded = false;
 let currentCallAmount = 0;
@@ -44,6 +40,28 @@ let anteCollected = false;
 let allowKick = false;
 let selectedNewHostId = null;
 
+// Trava global: enquanto uma ação que grava no banco estiver rolando,
+// nenhuma outra pode começar. Resolve o bug do clique duplo (Confirmar
+// Aumento, Call, All-in, etc. duplicando a jogada se clicado rápido
+// demais, antes do primeiro clique terminar de gravar).
+let isProcessingAction = false;
+
+// Toda ação assíncrona do jogo deve passar por aqui. Se já tiver algo
+// em andamento, ignora silenciosamente o clique extra. "button" (se
+// informado) fica desabilitado visualmente enquanto processa.
+async function runGuardedAction(button, fn) {
+  if (isProcessingAction) return;
+  isProcessingAction = true;
+  if (button) button.disabled = true;
+
+  try {
+    await fn();
+  } finally {
+    isProcessingAction = false;
+    if (button) button.disabled = false;
+  }
+}
+
 let dealerSeat = null;
 let currentTurnSeat = null;
 
@@ -52,22 +70,21 @@ let winCondition = 'elimination'; // 'elimination' ou 'round_limit'
 let roundLimit = null;
 let currentRound = 0;
 let gameStatus = 'in_progress';   // 'in_progress' ou 'finished'
-let startingChips = 1000;         // usado pelo rebuy (Fase 4) pra saber com quanto o jogador volta
+let startingChips = 1000;         // usado pelo rebuy pra saber com quanto o jogador volta
 
-// Configuração de fichas DESTA sala (definida pelo Host em host-config.html).
-// Começam com os padrões só como fallback de segurança — o valor real vem
-// do banco assim que refreshRoomInfo() rodar pela primeira vez.
-let roomChipValues = { ...chipValues };
-let roomInitialChipCounts = { ...initialChipCounts };
-
+// Cada botão de ficha é só um "somador" — fica desabilitado se, ao ser
+// clicado, a aposta atual ultrapassaria o saldo disponível do jogador.
+// Não existe mais "quantas fichas dessa cor eu tenho": o limite é
+// sempre o dinheiro (getMyStackTotal), nunca a quantidade de botões.
 function renderChipsUI() {
-  for (const color in myChipCounts) {
-    const counter = document.querySelector(`[data-count-for="${color}"]`);
-    if (counter) counter.textContent = myChipCounts[color];
+  const balance = getMyStackTotal();
 
+  Object.keys(CHIP_VALUES).forEach(function (color) {
     const chipButton = document.querySelector(`.chip[data-chip-color="${color}"]`);
-    if (chipButton) chipButton.disabled = myChipCounts[color] <= 0;
-  }
+    if (chipButton) {
+      chipButton.disabled = (currentBet + CHIP_VALUES[color]) > balance;
+    }
+  });
 
   const currentBetEl = document.getElementById('current-bet');
   if (currentBetEl) currentBetEl.textContent = formatMoney(currentBet);
@@ -148,10 +165,11 @@ function getMaxTableBet() {
   return max;
 }
 
-// FONTE DA VERDADE: sempre lê "chips" da última cópia do banco
-// (playersCache), nunca da carteira visual (myChipCounts). Toda decisão
-// de jogo (habilitar Call/Raise/All-in, valor do All-in, "Suas fichas")
-// passa por aqui — assim nenhuma delas pode divergir do Supabase.
+// FONTE DA VERDADE: sempre lê "chips" (o SALDO) da última cópia do
+// banco (playersCache) — não existe mais nenhuma "carteira visual"
+// separada. Toda decisão de jogo (habilitar Call/Raise/All-in, valor
+// do All-in, "Suas fichas", quais botões cabem na aposta) passa por
+// aqui, então nada pode divergir do Supabase.
 function getMyStackTotal() {
   const me = playersCache.find(function (p) { return p.id === myPlayerId; });
   return me ? me.chips : 0;
@@ -199,10 +217,6 @@ function renderActionPanel() {
 
     const raisePanel = document.getElementById('panel-raise');
     if (!raisePanel.classList.contains('hidden')) {
-      for (const color in pendingBetChips) {
-        myChipCounts[color] += pendingBetChips[color];
-        pendingBetChips[color] = 0;
-      }
       currentBet = 0;
       renderChipsUI();
       showActionsPanel();
@@ -289,13 +303,13 @@ function renderLeaderboard(players) {
 
   document.querySelectorAll('.btn-approve-rebuy').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      handleApproveRebuy(btn.dataset.playerId);
+      handleApproveRebuy(btn.dataset.playerId, btn);
     });
   });
 
   document.querySelectorAll('.btn-kick-player').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      handleKickPlayer(btn.dataset.playerId, btn.dataset.playerName);
+      handleKickPlayer(btn.dataset.playerId, btn.dataset.playerName, btn);
     });
   });
 }
@@ -399,42 +413,27 @@ function showRaisePanel() {
   document.getElementById('panel-raise').classList.remove('hidden');
   document.getElementById('panel-raise').classList.add('flex');
 
-  // Se o jogador ainda tem o saldo INTEIRO (acabou de entrar, ou acabou
-  // de "Jogar Novamente"), usa a distribuição EXATA que o Host configurou
-  // — não uma reconstrução genérica, que podia dar uma combinação
-  // diferente da que ele escolheu (isso era o bug 1/3/8: o jogo sempre
-  // "inventava" uma distribuição própria, ignorando a da sala).
-  // Fora desse caso (já apostou/ganhou fichas em algum momento), não tem
-  // como saber a distribuição "certa" pro valor atual — aí sim reconstrói
-  // usando os VALORES de ficha da sala (roomChipValues), nunca os padrões.
-  const myTotal = getMyStackTotal();
-  myChipCounts = (myTotal === startingChips)
-    ? { ...roomInitialChipCounts }
-    : buildChipCountsForTotal(myTotal, roomChipValues);
-
+  // Nada pra "reconstruir" — os botões de ficha são só somadores fixos.
+  // renderChipsUI() recalcula sozinho quais cabem no saldo disponível.
   renderChipsUI();
 }
 
 document.querySelectorAll('.chip').forEach(function (chipButton) {
   chipButton.addEventListener('click', function () {
     const color = chipButton.dataset.chipColor;
-    const value = Number(chipButton.dataset.chipValue);
+    const value = CHIP_VALUES[color];
+    const balance = getMyStackTotal();
 
-    if (myChipCounts[color] <= 0) return;
+    // Único limite agora é o saldo — não "quantas fichas dessa cor
+    // ainda tenho" (isso não existe mais).
+    if (currentBet + value > balance) return;
 
-    myChipCounts[color] -= 1;
-    pendingBetChips[color] += 1;
     currentBet += value;
-
     renderChipsUI();
   });
 });
 
 document.getElementById('btn-clear-bet').addEventListener('click', function () {
-  for (const color in pendingBetChips) {
-    myChipCounts[color] += pendingBetChips[color];
-    pendingBetChips[color] = 0;
-  }
   currentBet = 0;
   renderChipsUI();
 });
@@ -446,212 +445,221 @@ document.getElementById('btn-action-raise').addEventListener('click', function (
 });
 
 document.getElementById('btn-raise-back').addEventListener('click', function () {
-  for (const color in pendingBetChips) {
-    myChipCounts[color] += pendingBetChips[color];
-    pendingBetChips[color] = 0;
-  }
   currentBet = 0;
   renderChipsUI();
   showActionsPanel();
 });
 
-document.getElementById('btn-confirm-bet').addEventListener('click', async function () {
-  if (!isMyTurn()) return;
-  if (currentBet <= 0) return;
+document.getElementById('btn-confirm-bet').addEventListener('click', function () {
+  const button = document.getElementById('btn-confirm-bet');
+  runGuardedAction(button, async function () {
+    if (!isMyTurn()) return;
+    if (currentBet <= 0) return;
 
-  const betAmount = currentBet;
-  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
-  if (!me) return;
+    const betAmount = currentBet;
+    const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+    if (!me) return;
 
-  const newChips = me.chips - betAmount;
-  const newBet = me.current_bet + betAmount;
+    const newChips = me.chips - betAmount;
+    const newBet = me.current_bet + betAmount;
 
-  const { error: playerError } = await supabaseClient
-    .from('players')
-    .update({ chips: newChips, current_bet: newBet })
-    .eq('id', myPlayerId);
+    const { error: playerError } = await supabaseClient
+      .from('players')
+      .update({ chips: newChips, current_bet: newBet })
+      .eq('id', myPlayerId);
 
-  if (playerError) {
-    alert('Não foi possível confirmar o aumento: ' + playerError.message);
-    return;
-  }
-
-  const { data: roomRow } = await supabaseClient
-    .from('rooms').select('pot').eq('id', roomCode).single();
-
-  await supabaseClient
-    .from('rooms')
-    .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
-    .eq('id', roomCode);
-
-  currentBet = 0;
-  pendingBetChips = { preta: 0, azul: 0, vermelha: 0, verde: 0, branca: 0, amarela: 0 };
-  renderChipsUI();
-  showActionsPanel();
-
-  await advanceTurnAfterMyAction({ chips: newChips });
-});
-
-document.getElementById('btn-action-call').addEventListener('click', async function () {
-  if (!isMyTurn()) return;
-  if (document.getElementById('btn-action-call').disabled) return;
-  if (currentCallAmount <= 0) return;
-
-  const amount = currentCallAmount;
-  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
-  if (!me) return;
-
-  const newChips = me.chips - amount;
-  const newBet = me.current_bet + amount;
-
-  await supabaseClient
-    .from('players')
-    .update({ chips: newChips, current_bet: newBet })
-    .eq('id', myPlayerId);
-
-  const { data: roomRow } = await supabaseClient
-    .from('rooms').select('pot').eq('id', roomCode).single();
-
-  await supabaseClient
-    .from('rooms')
-    .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
-    .eq('id', roomCode);
-
-  renderActionPanel();
-
-  await advanceTurnAfterMyAction({ chips: newChips });
-});
-
-document.getElementById('btn-action-allin').addEventListener('click', async function () {
-  if (!isMyTurn()) return;
-  if (document.getElementById('btn-action-allin').disabled) return;
-
-  const me = playersCache.find(function (p) { return p.id === myPlayerId; });
-  if (!me) return;
-
-  // "amount" agora vem de getMyStackTotal(), que lê me.chips (o banco) —
-  // não pode mais divergir do que o servidor considera meu saldo real.
-  const amount = getMyStackTotal();
-  if (amount <= 0) return;
-
-  const newChips = me.chips - amount; // sempre 0, já que amount === me.chips
-
-  const newBet = me.current_bet + amount;
-
-  await supabaseClient
-    .from('players')
-    .update({ chips: newChips, current_bet: newBet })
-    .eq('id', myPlayerId);
-
-  const { data: roomRow } = await supabaseClient
-    .from('rooms').select('pot').eq('id', roomCode).single();
-
-  await supabaseClient
-    .from('rooms')
-    .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
-    .eq('id', roomCode);
-
-  renderActionPanel();
-
-  await advanceTurnAfterMyAction({ chips: newChips });
-});
-
-document.getElementById('btn-action-fold').addEventListener('click', async function () {
-  if (!isMyTurn()) return;
-
-  const wasFolded = hasFolded;
-  hasFolded = !hasFolded;
-
-  const foldBtn = document.getElementById('btn-action-fold');
-  foldBtn.querySelector('span').textContent = hasFolded ? 'Voltar pra rodada' : 'Desistir';
-
-  await supabaseClient
-    .from('players')
-    .update({ folded: hasFolded })
-    .eq('id', myPlayerId);
-
-  if (hasFolded && !wasFolded) {
-    // AUTO-WIN POR FOLD: se o meu fold deixou só 1 jogador ainda ativo
-    // na mão (não desistiu e ainda tem fichas), ele ganha o pote INTEIRO
-    // automaticamente — não faz sentido esperar side pot aqui, já que
-    // não sobrou ninguém pra disputar nenhuma camada além dele.
-    const projected = buildProjectedPlayers({ folded: true });
-    const activeSeatsNow = getActiveSeats(projected);
-
-    if (activeSeatsNow.length === 1 && potTotal > 0) {
-      const winner = projected.find(function (p) { return p.seat_number === activeSeatsNow[0]; });
-      if (winner) {
-        await resolveEndOfHand([{ winnerId: winner.id, amount: potTotal }]);
-        return;
-      }
+    if (playerError) {
+      alert('Não foi possível confirmar o aumento: ' + playerError.message);
+      return;
     }
 
-    await advanceTurnAfterMyAction({ folded: true });
-  }
+    const { data: roomRow } = await supabaseClient
+      .from('rooms').select('pot').eq('id', roomCode).single();
+
+    await supabaseClient
+      .from('rooms')
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
+      .eq('id', roomCode);
+
+    currentBet = 0;
+    renderChipsUI();
+    showActionsPanel();
+
+    await advanceTurnAfterMyAction({ chips: newChips });
+  });
 });
 
-document.getElementById('btn-start-hand').addEventListener('click', async function () {
-  if (!isHost) return;
+document.getElementById('btn-action-call').addEventListener('click', function () {
+  const button = document.getElementById('btn-action-call');
+  runGuardedAction(button, async function () {
+    if (!isMyTurn()) return;
+    if (button.disabled) return;
+    if (currentCallAmount <= 0) return;
 
-  // Usa "assentos ATIVOS" (não eliminados) pra calcular Dealer/Blinds —
-  // não faz sentido o botão do Dealer ou uma blind cair em alguém com
-  // 0 fichas, que nem pode participar da mão até fazer rebuy.
-  const activeSeatsForNewHand = getActiveSeats(playersCache);
-  if (activeSeatsForNewHand.length === 0) return;
+    const amount = currentCallAmount;
+    const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+    if (!me) return;
 
-  const newDealerSeat = computeNextDealerSeat(activeSeatsForNewHand, dealerSeat);
-  const firstToActSeat = computeBlindSeats(activeSeatsForNewHand, newDealerSeat).firstToActSeat;
+    const newChips = me.chips - amount;
+    const newBet = me.current_bet + amount;
 
-  const btn = document.getElementById('btn-start-hand');
-  btn.disabled = true;
-  btn.textContent = 'Iniciando...';
-
-  await supabaseClient
-    .from('rooms')
-    .update({ dealer_seat: newDealerSeat, current_turn_seat: firstToActSeat })
-    .eq('id', roomCode);
-
-  dealerSeat = newDealerSeat;
-  currentTurnSeat = firstToActSeat;
-
-  btn.disabled = false;
-  btn.textContent = 'Iniciar Mão';
-
-  renderHostUI();
-  renderLeaderboard(playersCache);
-  renderActionPanel();
-});
-
-document.getElementById('btn-force-ante').addEventListener('click', async function () {
-  if (!isHost) return;
-
-  const { data: roomRow } = await supabaseClient
-    .from('rooms').select('pot, ante_amount').eq('id', roomCode).single();
-
-  if (!roomRow) return;
-  const anteAmount = roomRow.ante_amount;
-
-  // Nunca cobra ante de quem desistiu OU já está eliminado (sem fichas
-  // pra pagar) — cobrar dos eliminados deixaria o saldo deles negativo.
-  const activePlayers = playersCache.filter(function (p) { return !p.folded && !p.is_eliminated; });
-
-  await Promise.all(activePlayers.map(function (p) {
-    return supabaseClient
+    await supabaseClient
       .from('players')
-      .update({ chips: p.chips - anteAmount, current_bet: p.current_bet + anteAmount })
-      .eq('id', p.id);
-  }));
+      .update({ chips: newChips, current_bet: newBet })
+      .eq('id', myPlayerId);
 
-  await supabaseClient
-    .from('rooms')
-    .update({
-      pot: roomRow.pot + (anteAmount * activePlayers.length),
-      ante_collected: true
-    })
-    .eq('id', roomCode);
+    const { data: roomRow } = await supabaseClient
+      .from('rooms').select('pot').eq('id', roomCode).single();
 
-  anteCollected = true;
-  renderHostUI();
+    await supabaseClient
+      .from('rooms')
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+      .eq('id', roomCode);
+
+    renderActionPanel();
+
+    await advanceTurnAfterMyAction({ chips: newChips });
+  });
+});
+
+document.getElementById('btn-action-allin').addEventListener('click', function () {
+  const button = document.getElementById('btn-action-allin');
+  runGuardedAction(button, async function () {
+    if (!isMyTurn()) return;
+    if (button.disabled) return;
+
+    const me = playersCache.find(function (p) { return p.id === myPlayerId; });
+    if (!me) return;
+
+    // "amount" agora vem de getMyStackTotal(), que lê me.chips (o banco) —
+    // não pode mais divergir do que o servidor considera meu saldo real.
+    const amount = getMyStackTotal();
+    if (amount <= 0) return;
+
+    const newChips = me.chips - amount; // sempre 0, já que amount === me.chips
+
+    const newBet = me.current_bet + amount;
+
+    await supabaseClient
+      .from('players')
+      .update({ chips: newChips, current_bet: newBet })
+      .eq('id', myPlayerId);
+
+    const { data: roomRow } = await supabaseClient
+      .from('rooms').select('pot').eq('id', roomCode).single();
+
+    await supabaseClient
+      .from('rooms')
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+      .eq('id', roomCode);
+
+    renderActionPanel();
+
+    await advanceTurnAfterMyAction({ chips: newChips });
+  });
+});
+
+document.getElementById('btn-action-fold').addEventListener('click', function () {
+  const foldBtn = document.getElementById('btn-action-fold');
+  runGuardedAction(foldBtn, async function () {
+    if (!isMyTurn()) return;
+
+    const wasFolded = hasFolded;
+    hasFolded = !hasFolded;
+
+    foldBtn.querySelector('span').textContent = hasFolded ? 'Voltar pra rodada' : 'Desistir';
+
+    await supabaseClient
+      .from('players')
+      .update({ folded: hasFolded })
+      .eq('id', myPlayerId);
+
+    if (hasFolded && !wasFolded) {
+      // AUTO-WIN POR FOLD: se o meu fold deixou só 1 jogador ainda ativo
+      // na mão (não desistiu e ainda tem fichas), ele ganha o pote INTEIRO
+      // automaticamente — não faz sentido esperar side pot aqui, já que
+      // não sobrou ninguém pra disputar nenhuma camada além dele.
+      const projected = buildProjectedPlayers({ folded: true });
+      const activeSeatsNow = getActiveSeats(projected);
+
+      if (activeSeatsNow.length === 1 && potTotal > 0) {
+        const winner = projected.find(function (p) { return p.seat_number === activeSeatsNow[0]; });
+        if (winner) {
+          await resolveEndOfHand([{ winnerId: winner.id, amount: potTotal }]);
+          return;
+        }
+      }
+
+      await advanceTurnAfterMyAction({ folded: true });
+    }
+  });
+});
+
+document.getElementById('btn-start-hand').addEventListener('click', function () {
+  const btn = document.getElementById('btn-start-hand');
+  runGuardedAction(btn, async function () {
+    if (!isHost) return;
+
+    // Usa "assentos ATIVOS" (não eliminados) pra calcular Dealer/Blinds —
+    // não faz sentido o botão do Dealer ou uma blind cair em alguém com
+    // 0 fichas, que nem pode participar da mão até fazer rebuy.
+    const activeSeatsForNewHand = getActiveSeats(playersCache);
+    if (activeSeatsForNewHand.length === 0) return;
+
+    const newDealerSeat = computeNextDealerSeat(activeSeatsForNewHand, dealerSeat);
+    const firstToActSeat = computeBlindSeats(activeSeatsForNewHand, newDealerSeat).firstToActSeat;
+
+    btn.textContent = 'Iniciando...';
+
+    await supabaseClient
+      .from('rooms')
+      .update({ dealer_seat: newDealerSeat, current_turn_seat: firstToActSeat })
+      .eq('id', roomCode);
+
+    dealerSeat = newDealerSeat;
+    currentTurnSeat = firstToActSeat;
+
+    btn.textContent = 'Iniciar Mão';
+
+    renderHostUI();
+    renderLeaderboard(playersCache);
+    renderActionPanel();
+  });
+});
+
+document.getElementById('btn-force-ante').addEventListener('click', function () {
+  const btn = document.getElementById('btn-force-ante');
+  runGuardedAction(btn, async function () {
+    if (!isHost) return;
+
+    const { data: roomRow } = await supabaseClient
+      .from('rooms').select('pot, ante_amount').eq('id', roomCode).single();
+
+    if (!roomRow) return;
+    const anteAmount = roomRow.ante_amount;
+
+    // Nunca cobra ante de quem desistiu OU já está eliminado (sem fichas
+    // pra pagar) — cobrar dos eliminados deixaria o saldo deles negativo.
+    const activePlayers = playersCache.filter(function (p) { return !p.folded && !p.is_eliminated; });
+
+    await Promise.all(activePlayers.map(function (p) {
+      return supabaseClient
+        .from('players')
+        .update({ chips: p.chips - anteAmount, current_bet: p.current_bet + anteAmount })
+        .eq('id', p.id);
+    }));
+
+    await supabaseClient
+      .from('rooms')
+      .update({
+        pot: roomRow.pot + (anteAmount * activePlayers.length),
+        ante_collected: true
+      })
+      .eq('id', roomCode);
+
+    anteCollected = true;
+    renderHostUI();
+  });
 });
 
 // ---------- 11B. FIM DE MÃO (compartilhado entre "Entregar Pote" manual e Auto-Win por Fold) ----------
@@ -768,122 +776,130 @@ async function resolveEndOfHand(assignments) {
 
 // Lê os seletores montados por renderGivePotPanel() (1 por pote) e
 // dispara resolveEndOfHand com todos os vencedores escolhidos de uma vez.
-async function handleGivePotClick() {
-  if (!isHost) return;
-
-  const selects = document.querySelectorAll('.pot-winner-select');
-  const assignments = [];
-
-  for (const select of selects) {
-    if (!select.value) {
-      alert('Selecione um vencedor para cada pote antes de confirmar.');
-      return;
-    }
-    assignments.push({ winnerId: select.value, amount: Number(select.dataset.potAmount) });
-  }
-
-  if (assignments.length === 0) return;
-
+function handleGivePotClick() {
   const btn = document.getElementById('btn-give-pot');
-  if (btn) { btn.disabled = true; btn.textContent = 'Entregando...'; }
+  runGuardedAction(btn, async function () {
+    if (!isHost) return;
 
-  await resolveEndOfHand(assignments);
+    const selects = document.querySelectorAll('.pot-winner-select');
+    const assignments = [];
+
+    for (const select of selects) {
+      if (!select.value) {
+        alert('Selecione um vencedor para cada pote antes de confirmar.');
+        return;
+      }
+      assignments.push({ winnerId: select.value, amount: Number(select.dataset.potAmount) });
+    }
+
+    if (assignments.length === 0) return;
+
+    if (btn) btn.textContent = 'Entregando...';
+
+    await resolveEndOfHand(assignments);
+  });
 }
 
-document.getElementById('btn-generate-code').addEventListener('click', async function () {
-  if (!isHost) return;
-
+document.getElementById('btn-generate-code').addEventListener('click', function () {
   const btn = document.getElementById('btn-generate-code');
-  btn.textContent = 'gerando...';
+  runGuardedAction(btn, async function () {
+    if (!isHost) return;
 
-  let success = false;
-  let attempts = 0;
+    btn.textContent = 'gerando...';
 
-  while (!success && attempts < 5) {
-    const candidate = generateRoomCode();
-    const { error } = await supabaseClient
-      .from('rooms')
-      .update({ join_code: candidate })
-      .eq('id', roomCode);
+    let success = false;
+    let attempts = 0;
 
-    if (!error) {
-      success = true;
-      joinCode = candidate;
-      renderRoomCodeUI();
+    while (!success && attempts < 5) {
+      const candidate = generateRoomCode();
+      const { error } = await supabaseClient
+        .from('rooms')
+        .update({ join_code: candidate })
+        .eq('id', roomCode);
+
+      if (!error) {
+        success = true;
+        joinCode = candidate;
+        renderRoomCodeUI();
+      }
+      attempts++;
     }
-    attempts++;
-  }
 
-  btn.textContent = 'novo código';
-  if (!success) alert('Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.');
+    btn.textContent = 'novo código';
+    if (!success) alert('Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.');
+  });
 });
 
-async function handleKickPlayer(playerId, playerName) {
-  if (!isHost || !allowKick) return;
-  const confirmed = confirm('Expulsar ' + playerName + ' da sala? Essa ação não pode ser desfeita.');
-  if (!confirmed) return;
+function handleKickPlayer(playerId, playerName, button) {
+  runGuardedAction(button, async function () {
+    if (!isHost || !allowKick) return;
+    const confirmed = confirm('Expulsar ' + playerName + ' da sala? Essa ação não pode ser desfeita.');
+    if (!confirmed) return;
 
-  const kickedPlayer = playersCache.find(function (p) { return p.id === playerId; });
+    const kickedPlayer = playersCache.find(function (p) { return p.id === playerId; });
 
-  // Atualização otimista: some da MINHA tela na hora, sem esperar o
-  // Realtime ir e voltar (o Realtime confirma isso pra todo mundo em
-  // seguida, inclusive corrige se o delete falhar).
-  playersCache = playersCache.filter(function (p) { return p.id !== playerId; });
-  renderLeaderboard(playersCache);
-  renderGivePotPanel();
+    // Atualização otimista: some da MINHA tela na hora, sem esperar o
+    // Realtime ir e voltar (o Realtime confirma isso pra todo mundo em
+    // seguida, inclusive corrige se o delete falhar).
+    playersCache = playersCache.filter(function (p) { return p.id !== playerId; });
+    renderLeaderboard(playersCache);
+    renderGivePotPanel();
 
-  const { error } = await supabaseClient.from('players').delete().eq('id', playerId);
+    const { error } = await supabaseClient.from('players').delete().eq('id', playerId);
 
-  if (error) {
-    alert('Não foi possível expulsar: ' + error.message);
-    refreshPlayers(); // desfaz a remoção otimista, busca o estado real
-    return;
-  }
-
-  if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
-    const occupiedSeats = getOccupiedSeats(playersCache);
-    const activeSeats = getActiveSeats(playersCache);
-    const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
-
-    if (nextSeat !== null) {
-      currentTurnSeat = nextSeat;
-      await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+    if (error) {
+      alert('Não foi possível expulsar: ' + error.message);
+      refreshPlayers(); // desfaz a remoção otimista, busca o estado real
+      return;
     }
-  }
+
+    if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
+      const occupiedSeats = getOccupiedSeats(playersCache);
+      const activeSeats = getActiveSeats(playersCache);
+      const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
+
+      if (nextSeat !== null) {
+        currentTurnSeat = nextSeat;
+        await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
+      }
+    }
+  });
 }
 
 // ---------- REBUY / RE-ENTRY: jogador eliminado pede, Host aprova ----------
 
-document.getElementById('btn-request-rebuy').addEventListener('click', async function () {
+document.getElementById('btn-request-rebuy').addEventListener('click', function () {
   const btn = document.getElementById('btn-request-rebuy');
-  btn.disabled = true;
-  btn.textContent = 'Enviando...';
+  runGuardedAction(btn, async function () {
+    btn.textContent = 'Enviando...';
 
-  await supabaseClient
-    .from('players')
-    .update({ needs_rebuy_approval: true })
-    .eq('id', myPlayerId);
+    await supabaseClient
+      .from('players')
+      .update({ needs_rebuy_approval: true })
+      .eq('id', myPlayerId);
 
-  btn.disabled = false;
-  btn.textContent = 'Pedir para voltar a jogar';
-  // A troca de texto pra "aguardando aprovação" acontece sozinha no
-  // próximo refreshPlayers(), quando o Realtime confirmar a mudança.
+    btn.textContent = 'Pedir para voltar a jogar';
+    // A troca de texto pra "aguardando aprovação" acontece sozinha no
+    // próximo refreshPlayers(), quando o Realtime confirmar a mudança.
+  });
 });
 
-async function handleApproveRebuy(playerId) {
-  if (!isHost) return;
+function handleApproveRebuy(playerId, button) {
+  runGuardedAction(button, async function () {
+    if (!isHost) return;
 
-  await supabaseClient
-    .from('players')
-    .update({
-      is_eliminated: false,
-      needs_rebuy_approval: false,
-      eliminated_at: null,
-      chips: startingChips,
-      current_bet: 0,
-      folded: false
-    })
-    .eq('id', playerId);
+    await supabaseClient
+      .from('players')
+      .update({
+        is_eliminated: false,
+        needs_rebuy_approval: false,
+        eliminated_at: null,
+        chips: startingChips,
+        current_bet: 0,
+        folded: false
+      })
+      .eq('id', playerId);
+  });
 }
 
 const rulesModal = document.getElementById('modal-rules');
@@ -968,22 +984,23 @@ document.getElementById('link-leave-room').addEventListener('click', function (e
   }
 });
 
-btnConfirmTransfer.addEventListener('click', async function () {
-  btnConfirmTransfer.disabled = true;
-  btnConfirmTransfer.textContent = 'Saindo...';
+btnConfirmTransfer.addEventListener('click', function () {
+  runGuardedAction(btnConfirmTransfer, async function () {
+    btnConfirmTransfer.textContent = 'Saindo...';
 
-  if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
 
-  if (selectedNewHostId === null) {
-    await supabaseClient.from('rooms').delete().eq('id', roomCode);
-  } else {
-    await supabaseClient.from('players').update({ is_host: true }).eq('id', selectedNewHostId);
-    await supabaseClient.from('rooms').update({ host_id: selectedNewHostId }).eq('id', roomCode);
-    await supabaseClient.from('players').delete().eq('id', myPlayerId);
-  }
+    if (selectedNewHostId === null) {
+      await supabaseClient.from('rooms').delete().eq('id', roomCode);
+    } else {
+      await supabaseClient.from('players').update({ is_host: true }).eq('id', selectedNewHostId);
+      await supabaseClient.from('rooms').update({ host_id: selectedNewHostId }).eq('id', roomCode);
+      await supabaseClient.from('players').delete().eq('id', myPlayerId);
+    }
 
-  clearSession();
-  window.location.href = 'home.html';
+    clearSession();
+    window.location.href = 'home.html';
+  });
 });
 
 async function refreshPlayers() {
@@ -1015,18 +1032,17 @@ async function refreshPlayers() {
     renderHostUI();
   }
 
-  // Não existe mais nenhum "ajuste incremental" da carteira visual aqui.
+  // Não existe mais nenhuma "carteira visual" pra reconciliar aqui.
   // getMyStackTotal() já lê "me.chips" direto de playersCache (atualizado
-  // 2 linhas acima), então "Suas fichas" e as regras de Call/Raise/All-in
-  // ficam automaticamente corretas — sem depender de myChipCounts.
-  // myChipCounts só é reconstruída quando o painel de fichas abre
-  // (showRaisePanel), que é a única hora em que ela é exibida.
+  // 2 linhas acima), então "Suas fichas", os botões de aposta e as
+  // regras de Call/Raise/All-in ficam automaticamente corretos.
 
   hasFolded = me.folded;
   const foldBtn = document.getElementById('btn-action-fold');
   foldBtn.querySelector('span').textContent = hasFolded ? 'Voltar pra rodada' : 'Desistir';
+  renderChipsUI(); // recalcula quais botões cabem no saldo (e desabilita tudo se desistiu, via CSS abaixo)
   document.querySelectorAll('.chip').forEach(function (c) {
-    c.disabled = hasFolded || myChipCounts[c.dataset.chipColor] <= 0;
+    if (hasFolded) c.disabled = true;
   });
 
   // Decide qual dos 3 painéis do dock mostrar: eliminado, ou o normal
@@ -1061,17 +1077,6 @@ async function refreshRoomInfo() {
   gameStatus = room.game_status;
   startingChips = room.starting_chips;
 
-  // Usa a configuração de fichas REAL desta sala (definida pelo Host),
-  // com os padrões como fallback só se por algum motivo vier vazio.
-  roomChipValues = (room.chip_values && Object.keys(room.chip_values).length > 0)
-    ? room.chip_values
-    : { ...chipValues };
-  roomInitialChipCounts = (room.chip_counts && Object.keys(room.chip_counts).length > 0)
-    ? room.chip_counts
-    : { ...initialChipCounts };
-
-  applyRoomChipConfigToDOM();
-
   renderRoomCodeUI();
   renderPotUI();
   renderHostUI();
@@ -1082,23 +1087,6 @@ async function refreshRoomInfo() {
   // Se eu recarreguei a página (ou entrei) DEPOIS do jogo já ter
   // terminado, não faz sentido me mostrar a mesa — vai direto pro Lobby.
   redirectToLobbyIfFinished();
-}
-
-// Atualiza o valor exibido (e o data-chip-value usado nos cliques) de
-// cada botão de ficha pra bater com o que o Host configurou — sem isso,
-// os botões sempre mostravam os valores padrão (5/10/20/50/100/200),
-// não importa o que a sala tivesse configurado (bug 1/3).
-function applyRoomChipConfigToDOM() {
-  ['preta', 'azul', 'vermelha', 'verde', 'branca', 'amarela'].forEach(function (color) {
-    const btn = document.querySelector('.chip[data-chip-color="' + color + '"]');
-    if (!btn) return;
-
-    const value = roomChipValues[color];
-    btn.dataset.chipValue = value;
-
-    const valueLabel = btn.querySelector('.chip-value');
-    if (valueLabel) valueLabel.textContent = formatMoney(value);
-  });
 }
 
 // Chamada tanto aqui quanto no listener do Realtime (subscribeToRoom) —
