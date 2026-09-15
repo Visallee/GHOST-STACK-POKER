@@ -8,13 +8,14 @@ import {
 import {
   getOccupiedSeats,
   getActiveSeats,
-  getNextTurnSeat,
   computeNextDealerSeat,
   computeBlindSeats
 } from './turn.js';
 import { computeSidePots } from './pots.js';
 import { evaluateWinCondition, buildFinalResults } from './win-condition.js';
 import { getAmountToCall, validateBetAmount } from './betting.js';
+import { getTableMaxBet, applyActionToRound, isBettingRoundClosed, getNextSeatToAct } from './betting-round.js';
+import { HAND_STATE } from './hand-state.js';
 
 const session = loadSession();
 
@@ -65,6 +66,7 @@ async function runGuardedAction(button, fn) {
 
 let dealerSeat = null;
 let currentTurnSeat = null;
+let handState = HAND_STATE.NO_HAND; // 'no_hand' | 'waiting_for_ante' | 'betting' | 'round_complete'
 
 // ----- Condição de vitória (definida pelo Host em host-config.html) -----
 let winCondition = 'elimination'; // 'elimination' ou 'round_limit'
@@ -148,16 +150,12 @@ function getMySeatNumber() {
 
 function isMyTurn() {
   const mySeat = getMySeatNumber();
-  return mySeat !== null && mySeat !== undefined && mySeat === currentTurnSeat;
+  return handState === HAND_STATE.BETTING &&
+    mySeat !== null && mySeat !== undefined && mySeat === currentTurnSeat;
 }
 
 function getCurrentTurnPlayer() {
   return playersCache.find(function (p) { return p.seat_number === currentTurnSeat; }) || null;
-}
-
-function getFirstToActSeat() {
-  const occupiedSeats = getOccupiedSeats(playersCache);
-  return computeBlindSeats(occupiedSeats, dealerSeat).firstToActSeat;
 }
 
 function buildProjectedPlayers(overrides) {
@@ -167,44 +165,85 @@ function buildProjectedPlayers(overrides) {
   });
 }
 
+// O CORAÇÃO DO MOTOR DE TURNOS (Fase 4). Substitui a regra antiga
+// ("próximo assento ativo", que não sabia se alguém já tinha agido) —
+// agora usa js/betting-round.js pra saber de verdade quem ainda
+// precisa decidir algo nesta rodada, e fecha a rodada corretamente
+// quando não sobra ninguém (em vez de inventar um "próximo jogador
+// fantasma" ou devolver a vez pra quem já tinha agido).
+//
+// "overrides" descreve como o MEU jogador ficou depois da ação —
+// sempre precisa incluir "current_bet" quando a ação mexeu em dinheiro
+// (Call/Raise/All-in), senão o motor não sabe reconhecer um aumento.
 async function advanceTurnAfterMyAction(overrides) {
   const mySeat = getMySeatNumber();
   if (mySeat === null || mySeat === undefined) return;
 
+  const previousMaxBet = getMaxTableBet(); // teto da mesa ANTES da minha ação
   const projected = buildProjectedPlayers(overrides);
-  const occupiedSeats = getOccupiedSeats(projected);
-  const activeSeats = getActiveSeats(projected);
+  const myProjected = projected.find(function (p) { return p.id === myPlayerId; });
+  const myNewBet = myProjected ? myProjected.current_bet : 0;
 
-  const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, mySeat);
-  if (nextSeat === null) return;
+  // Aplica os efeitos da minha ação sobre "quem já agiu" — se eu
+  // aumentei a aposta, isso reabre a decisão pra todo mundo que ainda
+  // está na mão e tem fichas.
+  const updatedPlayers = applyActionToRound(projected, myPlayerId, myNewBet, previousMaxBet);
+  playersCache = updatedPlayers; // atualização otimista local
 
-  currentTurnSeat = nextSeat;
+  const newMaxBet = getTableMaxBet(updatedPlayers);
+  const closed = isBettingRoundClosed(updatedPlayers, newMaxBet);
+
+  // Grava as flags "já agiu" atualizadas de todo mundo — é o jeito
+  // mais simples e confiável de manter o banco sincronizado com a
+  // decisão tomada aqui (poucos jogadores numa mesa de poker caseira,
+  // então gravar todo mundo de uma vez não é um problema de escala).
+  await Promise.all(updatedPlayers.map(function (p) {
+    return supabaseClient
+      .from('players')
+      .update({ has_acted_this_round: p.has_acted_this_round })
+      .eq('id', p.id);
+  }));
+
+  if (closed) {
+    handState = HAND_STATE.ROUND_COMPLETE;
+    currentTurnSeat = null;
+    await supabaseClient
+      .from('rooms')
+      .update({ current_turn_seat: null, hand_state: HAND_STATE.ROUND_COMPLETE })
+      .eq('id', roomCode);
+  } else {
+    const occupiedSeats = getOccupiedSeats(updatedPlayers);
+    const nextSeat = getNextSeatToAct(occupiedSeats, updatedPlayers, newMaxBet, mySeat);
+
+    // Segurança: se por algum motivo não achar ninguém (não devia
+    // acontecer, já que isBettingRoundClosed disse que não estava
+    // fechada), trata como rodada fechada em vez de travar o jogo.
+    currentTurnSeat = nextSeat;
+    handState = nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
+
+    await supabaseClient
+      .from('rooms')
+      .update({ current_turn_seat: nextSeat, hand_state: handState })
+      .eq('id', roomCode);
+  }
+
   renderLeaderboard(playersCache);
   renderActionPanel();
   renderHostUI();
-
-  await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
 }
 
 function renderHostUI() {
   document.getElementById('btn-generate-code').classList.toggle('hidden', !isHost);
   document.getElementById('panel-give-pot').classList.toggle('hidden', !isHost);
 
-  const handInProgress = currentTurnSeat !== null && currentTurnSeat !== undefined;
-
-  document.getElementById('btn-start-hand').classList.toggle('hidden', !(isHost && !handInProgress));
-
-  const isFirstTurnOfHand = handInProgress && currentTurnSeat === getFirstToActSeat();
-  const showAnteBtn = isHost && !anteCollected && isFirstTurnOfHand;
-  document.getElementById('btn-force-ante').classList.toggle('hidden', !showAnteBtn);
+  document.getElementById('btn-start-hand').classList.toggle('hidden', !(isHost && handState === HAND_STATE.NO_HAND));
+  document.getElementById('btn-force-ante').classList.toggle('hidden', !(isHost && handState === HAND_STATE.WAITING_FOR_ANTE));
 }
 
+// Delega pro cálculo puro de betting-round.js — evita ter a mesma
+// conta em dois lugares diferentes do código.
 function getMaxTableBet() {
-  let max = 0;
-  playersCache.forEach(function (p) {
-    if (!p.folded && p.current_bet > max) max = p.current_bet;
-  });
-  return max;
+  return getTableMaxBet(playersCache);
 }
 
 // FONTE DA VERDADE: sempre lê "chips" (o SALDO) da última cópia do
@@ -249,15 +288,26 @@ function renderActionPanel() {
   const grid = document.getElementById('action-buttons-grid');
   const statusLabel = document.getElementById('turn-status-label');
   const waitingMsg = document.getElementById('turn-waiting-message');
-  const waitingName = document.getElementById('turn-waiting-name');
 
   grid.classList.toggle('hidden', !myTurn);
   statusLabel.classList.toggle('hidden', !myTurn);
   waitingMsg.classList.toggle('hidden', myTurn);
 
   if (!myTurn) {
-    const turnPlayer = getCurrentTurnPlayer();
-    waitingName.textContent = turnPlayer ? turnPlayer.name : 'outro jogador';
+    // Mensagem certa pra cada estado — antes disso, tudo que não era
+    // "minha vez" virava genericamente "aguardando outro jogador",
+    // mesmo quando na verdade a mão nem tinha começado, ou as apostas
+    // já tinham fechado e só faltava o Host resolver.
+    if (handState === HAND_STATE.NO_HAND) {
+      waitingMsg.textContent = 'Aguardando o Host iniciar a mão.';
+    } else if (handState === HAND_STATE.WAITING_FOR_ANTE) {
+      waitingMsg.textContent = 'Aguardando o Host cobrar o Ante.';
+    } else if (handState === HAND_STATE.ROUND_COMPLETE) {
+      waitingMsg.textContent = 'Apostas encerradas — aguardando o Host distribuir o pote.';
+    } else {
+      const turnPlayer = getCurrentTurnPlayer();
+      waitingMsg.textContent = 'Aguardando ' + (turnPlayer ? turnPlayer.name : 'outro jogador') + ' jogar...';
+    }
 
     const raisePanel = document.getElementById('panel-raise');
     if (!raisePanel.classList.contains('hidden')) {
@@ -542,7 +592,7 @@ document.getElementById('btn-confirm-bet').addEventListener('click', function ()
     renderChipsUI();
     showActionsPanel();
 
-    await advanceTurnAfterMyAction({ chips: newChips });
+    await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
   });
 });
 
@@ -594,7 +644,7 @@ document.getElementById('btn-action-call').addEventListener('click', function ()
 
     renderActionPanel();
 
-    await advanceTurnAfterMyAction({ chips: newChips });
+    await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
   });
 });
 
@@ -618,7 +668,7 @@ document.getElementById('btn-action-allin').addEventListener('click', function (
 
     await supabaseClient
       .from('players')
-      .update({ chips: newChips, current_bet: newBet })
+      .update({ chips: newChips, current_bet: newBet, is_all_in: true })
       .eq('id', myPlayerId);
 
     const { data: roomRow } = await supabaseClient
@@ -631,7 +681,7 @@ document.getElementById('btn-action-allin').addEventListener('click', function (
 
     renderActionPanel();
 
-    await advanceTurnAfterMyAction({ chips: newChips });
+    await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet, is_all_in: true });
   });
 });
 
@@ -676,24 +726,34 @@ document.getElementById('btn-start-hand').addEventListener('click', function () 
   runGuardedAction(btn, async function () {
     if (!isHost) return;
 
-    // Usa "assentos ATIVOS" (não eliminados) pra calcular Dealer/Blinds —
-    // não faz sentido o botão do Dealer ou uma blind cair em alguém com
-    // 0 fichas, que nem pode participar da mão até fazer rebuy.
+    // Usa "assentos ATIVOS" (não eliminados) pra calcular o Dealer —
+    // não faz sentido o botão do Dealer cair em alguém com 0 fichas,
+    // que nem pode participar da mão até fazer rebuy.
     const activeSeatsForNewHand = getActiveSeats(playersCache);
     if (activeSeatsForNewHand.length === 0) return;
 
     const newDealerSeat = computeNextDealerSeat(activeSeatsForNewHand, dealerSeat);
-    const firstToActSeat = computeBlindSeats(activeSeatsForNewHand, newDealerSeat).firstToActSeat;
 
     btn.textContent = 'Iniciando...';
 
+    // IMPORTANTE (Fase 4): NÃO libera o primeiro turno aqui. O ciclo
+    // obrigatório é Iniciar Mão -> Cobrar Antes -> só então os turnos
+    // começam. Reseta "já agiu"/"all-in" de todo mundo pra mão nova.
+    await Promise.all(playersCache.map(function (p) {
+      return supabaseClient
+        .from('players')
+        .update({ has_acted_this_round: false, is_all_in: false })
+        .eq('id', p.id);
+    }));
+
     await supabaseClient
       .from('rooms')
-      .update({ dealer_seat: newDealerSeat, current_turn_seat: firstToActSeat })
+      .update({ dealer_seat: newDealerSeat, current_turn_seat: null, hand_state: HAND_STATE.WAITING_FOR_ANTE })
       .eq('id', roomCode);
 
     dealerSeat = newDealerSeat;
-    currentTurnSeat = firstToActSeat;
+    currentTurnSeat = null;
+    handState = HAND_STATE.WAITING_FOR_ANTE;
 
     btn.textContent = 'Iniciar Mão';
 
@@ -707,6 +767,7 @@ document.getElementById('btn-force-ante').addEventListener('click', function () 
   const btn = document.getElementById('btn-force-ante');
   runGuardedAction(btn, async function () {
     if (!isHost) return;
+    if (handState !== HAND_STATE.WAITING_FOR_ANTE) return; // só faz sentido no início da mão
 
     const { data: roomRow } = await supabaseClient
       .from('rooms').select('pot, ante_amount').eq('id', roomCode).single();
@@ -721,20 +782,34 @@ document.getElementById('btn-force-ante').addEventListener('click', function () 
     await Promise.all(activePlayers.map(function (p) {
       return supabaseClient
         .from('players')
-        .update({ chips: p.chips - anteAmount, current_bet: p.current_bet + anteAmount })
+        // O Ante NÃO conta como "ter agido" — todo jogador ainda
+        // precisa decidir algo de verdade na rodada de apostas, mesmo
+        // que os valores já estejam empatados por causa do Ante.
+        .update({ chips: p.chips - anteAmount, current_bet: p.current_bet + anteAmount, has_acted_this_round: false })
         .eq('id', p.id);
     }));
+
+    // Agora sim: calcula quem age primeiro e libera o turno de verdade.
+    const activeSeatsNow = getActiveSeats(playersCache);
+    const firstToActSeat = computeBlindSeats(activeSeatsNow, dealerSeat).firstToActSeat;
 
     await supabaseClient
       .from('rooms')
       .update({
         pot: roomRow.pot + (anteAmount * activePlayers.length),
-        ante_collected: true
+        ante_collected: true,
+        hand_state: HAND_STATE.BETTING,
+        current_turn_seat: firstToActSeat
       })
       .eq('id', roomCode);
 
     anteCollected = true;
+    handState = HAND_STATE.BETTING;
+    currentTurnSeat = firstToActSeat;
+
     renderHostUI();
+    renderLeaderboard(playersCache);
+    renderActionPanel();
   });
 });
 
@@ -759,7 +834,9 @@ async function resolveEndOfHand(assignments) {
 
   // 2) Aplica os ganhos a todo mundo e detecta quem ZEROU nesta mão
   // (fica marcado como eliminado, com o horário exato — usado no
-  // ranking final do modo Mata-mata).
+  // ranking final do modo Mata-mata). Também reseta "já agiu"/"all-in"
+  // pra próxima mão — mesmo que ela ainda não comece de verdade agora
+  // (falta o Host cobrar o Ante de novo).
   const nowIso = new Date().toISOString();
   const updatedPlayers = playersCache.map(function (p) {
     const gain = gains[p.id] || 0;
@@ -770,6 +847,8 @@ async function resolveEndOfHand(assignments) {
       chips: newChips,
       current_bet: 0,
       folded: false,
+      has_acted_this_round: false,
+      is_all_in: false,
       is_eliminated: newChips <= 0 ? true : p.is_eliminated,
       eliminated_at: justEliminated ? nowIso : p.eliminated_at
     });
@@ -782,19 +861,20 @@ async function resolveEndOfHand(assignments) {
         chips: p.chips,
         current_bet: p.current_bet,
         folded: p.folded,
+        has_acted_this_round: p.has_acted_this_round,
+        is_all_in: p.is_all_in,
         is_eliminated: p.is_eliminated,
         eliminated_at: p.eliminated_at
       })
       .eq('id', p.id);
   }));
 
-  // 3) Gira o Dealer e calcula quem age primeiro na PRÓXIMA mão (só
-  // importa de verdade se o jogo for continuar). Usa "updatedPlayers"
-  // (não "playersCache") porque alguém pode ter acabado de ZERAR
-  // NESTA MESMA mão — não pode virar Dealer/Blind de olho já eliminado.
+  // 3) Gira o Dealer pra PRÓXIMA mão (só a posição — os turnos em si só
+  // começam depois que o Host cobrar o Ante de novo). Usa
+  // "updatedPlayers" (não "playersCache") porque alguém pode ter
+  // acabado de ZERAR NESTA MESMA mão — não pode virar Dealer já eliminado.
   const activeSeatsForNextHand = getActiveSeats(updatedPlayers);
   const newDealerSeat = computeNextDealerSeat(activeSeatsForNextHand, dealerSeat);
-  const nextHandTurn = computeBlindSeats(activeSeatsForNextHand, newDealerSeat).firstToActSeat;
 
   // 4) Avalia a condição de vitória com os dados JÁ atualizados desta mão.
   const newRound = currentRound + 1;
@@ -816,9 +896,14 @@ async function resolveEndOfHand(assignments) {
     roomUpdate.final_results = buildFinalResults(updatedPlayers, winCondition);
     roomUpdate.dealer_seat = null;
     roomUpdate.current_turn_seat = null;
+    roomUpdate.hand_state = HAND_STATE.NO_HAND;
   } else {
+    // CICLO OBRIGATÓRIO (Fase 4): a mão termina aqui, mas os turnos da
+    // PRÓXIMA mão só começam depois que o Host clicar em "Cobrar
+    // Antes" de novo — nunca libera o turno automaticamente.
     roomUpdate.dealer_seat = newDealerSeat;
-    roomUpdate.current_turn_seat = nextHandTurn;
+    roomUpdate.current_turn_seat = null;
+    roomUpdate.hand_state = HAND_STATE.WAITING_FOR_ANTE;
   }
 
   await supabaseClient.from('rooms').update(roomUpdate).eq('id', roomCode);
@@ -830,7 +915,8 @@ async function resolveEndOfHand(assignments) {
 
   if (!winCheck.finished) {
     dealerSeat = newDealerSeat;
-    currentTurnSeat = nextHandTurn;
+    currentTurnSeat = null;
+    handState = HAND_STATE.WAITING_FOR_ANTE;
   }
 
   hasFolded = false;
@@ -845,6 +931,7 @@ async function resolveEndOfHand(assignments) {
 
   if (winCheck.finished) {
     gameStatus = 'finished';
+    handState = HAND_STATE.NO_HAND;
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
     window.location.href = 'lobby.html';
   }
@@ -929,15 +1016,21 @@ function handleKickPlayer(playerId, playerName, button) {
       return;
     }
 
-    if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat) {
+    if (kickedPlayer && kickedPlayer.seat_number === currentTurnSeat && handState === HAND_STATE.BETTING) {
       const occupiedSeats = getOccupiedSeats(playersCache);
-      const activeSeats = getActiveSeats(playersCache);
-      const nextSeat = getNextTurnSeat(occupiedSeats, activeSeats, kickedPlayer.seat_number);
+      const maxBet = getMaxTableBet();
+      const nextSeat = getNextSeatToAct(occupiedSeats, playersCache, maxBet, kickedPlayer.seat_number);
 
-      if (nextSeat !== null) {
-        currentTurnSeat = nextSeat;
-        await supabaseClient.from('rooms').update({ current_turn_seat: nextSeat }).eq('id', roomCode);
-      }
+      currentTurnSeat = nextSeat;
+      handState = nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
+
+      await supabaseClient
+        .from('rooms')
+        .update({ current_turn_seat: nextSeat, hand_state: handState })
+        .eq('id', roomCode);
+
+      renderHostUI();
+      renderActionPanel();
     }
   });
 }
@@ -972,7 +1065,9 @@ function handleApproveRebuy(playerId, button) {
         eliminated_at: null,
         chips: startingChips,
         current_bet: 0,
-        folded: false
+        folded: false,
+        has_acted_this_round: false,
+        is_all_in: false
       })
       .eq('id', playerId);
   });
@@ -1147,6 +1242,7 @@ async function refreshRoomInfo() {
   allowKick = room.allow_kick;
   dealerSeat = room.dealer_seat;
   currentTurnSeat = room.current_turn_seat;
+  handState = room.hand_state;
   winCondition = room.win_condition;
   roundLimit = room.round_limit;
   currentRound = room.current_round;
@@ -1193,6 +1289,7 @@ function subscribeToRoom() {
         allowKick = payload.new.allow_kick;
         dealerSeat = payload.new.dealer_seat;
         currentTurnSeat = payload.new.current_turn_seat;
+        handState = payload.new.hand_state;
         winCondition = payload.new.win_condition;
         roundLimit = payload.new.round_limit;
         currentRound = payload.new.current_round;
