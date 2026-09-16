@@ -11,7 +11,7 @@ import {
   computeNextDealerSeat,
   computeBlindSeats
 } from './turn.js';
-import { computeSidePots } from './pots.js';
+import { computeSidePots, splitPotAmongWinners } from './pots.js';
 import { evaluateWinCondition, buildFinalResults } from './win-condition.js';
 import { getAmountToCall, validateBetAmount } from './betting.js';
 import { getTableMaxBet, applyActionToRound, isBettingRoundClosed, getNextSeatToAct } from './betting-round.js';
@@ -422,47 +422,63 @@ function renderGivePotPanel() {
   const contributions = playersCache.map(function (p) {
     return { id: p.id, bet: p.current_bet, folded: p.folded };
   });
-  const pots = computeSidePots(contributions);
+  const result = computeSidePots(contributions);
 
   container.innerHTML = '';
 
-  if (pots.length === 0) {
+  if (result.pots.length === 0 && result.autoAwards.length === 0) {
     container.innerHTML = '<p class="text-cream/40 text-xs font-body">Nenhuma aposta na mesa ainda — nada pra entregar.</p>';
     return;
   }
 
-  pots.forEach(function (pot, index) {
+  // Devoluções automáticas (excedente sem adversário) — não pedem
+  // decisão nenhuma do Host, só avisamos que vão acontecer sozinhas.
+  if (result.autoAwards.length > 0) {
+    const info = document.createElement('p');
+    info.className = 'text-cream/40 text-[11px] font-body mb-3';
+    const names = result.autoAwards.map(function (a) {
+      const p = playersCache.find(function (pp) { return pp.id === a.playerId; });
+      return (p ? p.name : '?') + ' (+' + formatMoney(a.amount) + ' devolvido)';
+    }).join(', ');
+    info.textContent = 'Sem adversário pra disputar: ' + names + '.';
+    container.appendChild(info);
+  }
+
+  result.pots.forEach(function (pot, index) {
     const eligiblePlayers = playersCache.filter(function (p) {
       return pot.eligible_player_ids.indexOf(p.id) !== -1;
     });
 
     const wrap = document.createElement('div');
-    wrap.className = 'mb-3';
+    wrap.className = 'mb-3 pot-winner-group';
+    wrap.dataset.potAmount = pot.amount;
 
     const label = document.createElement('label');
     label.className = 'block text-cream/60 text-xs font-body mb-1';
-    label.textContent = pots.length > 1
-      ? ('Pote ' + (index + 1) + ' de ' + pots.length + ' — ' + formatMoney(pot.amount))
-      : ('Vencedor da rodada — pote de ' + formatMoney(pot.amount));
-
-    const select = document.createElement('select');
-    select.className = 'pot-winner-select w-full bg-black/30 text-cream border border-gold/25 rounded-lg px-3 py-2.5 font-body outline-none focus:border-gold';
-    select.dataset.potAmount = pot.amount;
-
-    const defaultOption = document.createElement('option');
-    defaultOption.value = '';
-    defaultOption.textContent = 'Selecionar jogador...';
-    select.appendChild(defaultOption);
-
-    eligiblePlayers.forEach(function (p) {
-      const option = document.createElement('option');
-      option.value = p.id;
-      option.textContent = p.name + (p.id === myPlayerId ? ' (você)' : '');
-      select.appendChild(option);
-    });
+    label.textContent = result.pots.length > 1
+      ? ('Pote ' + (index + 1) + ' de ' + result.pots.length + ' — ' + formatMoney(pot.amount) + ' (marque mais de 1 em caso de empate)')
+      : ('Vencedor da rodada — pote de ' + formatMoney(pot.amount) + ' (marque mais de 1 em caso de empate)');
 
     wrap.appendChild(label);
-    wrap.appendChild(select);
+
+    eligiblePlayers.forEach(function (p) {
+      const optionLabel = document.createElement('label');
+      optionLabel.className = 'flex items-center gap-2 py-1.5 px-1 text-cream font-body text-sm';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'pot-winner-checkbox';
+      checkbox.value = p.id;
+      checkbox.style.accentColor = '#C9A227';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = p.name + (p.id === myPlayerId ? ' (você)' : '');
+
+      optionLabel.appendChild(checkbox);
+      optionLabel.appendChild(nameSpan);
+      wrap.appendChild(optionLabel);
+    });
+
     container.appendChild(wrap);
   });
 
@@ -470,7 +486,7 @@ function renderGivePotPanel() {
   confirmBtn.id = 'btn-give-pot';
   confirmBtn.type = 'button';
   confirmBtn.className = 'w-full bg-gold text-ink font-body font-semibold py-2.5 rounded-lg text-sm mt-1';
-  confirmBtn.textContent = pots.length > 1 ? 'Entregar todos os potes' : 'Entregar pote';
+  confirmBtn.textContent = result.pots.length > 1 ? 'Entregar todos os potes' : (result.pots.length === 1 ? 'Entregar pote' : 'Confirmar devolução');
   confirmBtn.addEventListener('click', handleGivePotClick);
   container.appendChild(confirmBtn);
 }
@@ -944,15 +960,39 @@ function handleGivePotClick() {
   runGuardedAction(btn, async function () {
     if (!isHost) return;
 
-    const selects = document.querySelectorAll('.pot-winner-select');
     const assignments = [];
 
-    for (const select of selects) {
-      if (!select.value) {
-        alert('Selecione um vencedor para cada pote antes de confirmar.');
+    // 1) Recalcula os potes/devoluções NA HORA de confirmar (não confia
+    // num valor guardado de quando o painel foi desenhado) — evita
+    // divergência se algo mudou entre o desenho e o clique.
+    const contributions = playersCache.map(function (p) {
+      return { id: p.id, bet: p.current_bet, folded: p.folded };
+    });
+    const result = computeSidePots(contributions);
+
+    // 2) Devoluções automáticas (excedente sem adversário) sempre entram,
+    // sem precisar de nenhuma escolha do Host.
+    result.autoAwards.forEach(function (a) {
+      assignments.push({ winnerId: a.playerId, amount: a.amount });
+    });
+
+    // 3) Cada grupo de pote real precisa de pelo menos 1 marcado —
+    // marcar mais de 1 divide o pote entre os empatados.
+    const groups = document.querySelectorAll('.pot-winner-group');
+    for (const group of groups) {
+      const potAmount = Number(group.dataset.potAmount);
+      const checked = group.querySelectorAll('.pot-winner-checkbox:checked');
+
+      if (checked.length === 0) {
+        alert('Selecione pelo menos 1 vencedor para cada pote antes de confirmar (marque mais de 1 em caso de empate).');
         return;
       }
-      assignments.push({ winnerId: select.value, amount: Number(select.dataset.potAmount) });
+
+      const winnerIds = Array.from(checked).map(function (cb) { return cb.value; });
+      const splits = splitPotAmongWinners(potAmount, winnerIds);
+      splits.forEach(function (s) {
+        assignments.push({ winnerId: s.playerId, amount: s.amount });
+      });
     }
 
     if (assignments.length === 0) return;
