@@ -233,7 +233,7 @@ async function advanceTurnAfterMyAction(overrides) {
 }
 
 function renderHostUI() {
-  document.getElementById('btn-generate-code').classList.toggle('hidden', !isHost);
+  document.getElementById('btn-open-room-settings').classList.toggle('hidden', !isHost);
   document.getElementById('panel-give-pot').classList.toggle('hidden', !isHost);
 
   document.getElementById('btn-start-hand').classList.toggle('hidden', !(isHost && handState === HAND_STATE.NO_HAND));
@@ -1003,12 +1003,34 @@ function handleGivePotClick() {
   });
 }
 
-document.getElementById('btn-generate-code').addEventListener('click', function () {
-  const btn = document.getElementById('btn-generate-code');
+// ---------- MODAL: Configurações da Sala (só o Host) ----------
+
+const roomSettingsModal = document.getElementById('modal-room-settings');
+
+document.getElementById('btn-open-room-settings').addEventListener('click', function () {
+  if (!isHost) return;
+  roomSettingsModal.classList.remove('hidden');
+  roomSettingsModal.classList.add('flex');
+});
+
+document.getElementById('btn-close-room-settings').addEventListener('click', function () {
+  roomSettingsModal.classList.add('hidden');
+  roomSettingsModal.classList.remove('flex');
+});
+
+roomSettingsModal.addEventListener('click', function (event) {
+  if (event.target === roomSettingsModal) {
+    roomSettingsModal.classList.add('hidden');
+    roomSettingsModal.classList.remove('flex');
+  }
+});
+
+document.getElementById('btn-trocar-codigo').addEventListener('click', function () {
+  const btn = document.getElementById('btn-trocar-codigo');
   runGuardedAction(btn, async function () {
     if (!isHost) return;
 
-    btn.textContent = 'gerando...';
+    btn.textContent = 'Gerando...';
 
     let success = false;
     let attempts = 0;
@@ -1028,8 +1050,46 @@ document.getElementById('btn-generate-code').addEventListener('click', function 
       attempts++;
     }
 
-    btn.textContent = 'novo código';
-    if (!success) alert('Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.');
+    btn.textContent = success ? 'Código trocado!' : 'Trocar código da sala';
+    if (!success) {
+      alert('Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.');
+    } else {
+      setTimeout(function () { btn.textContent = 'Trocar código da sala'; }, 1500);
+    }
+  });
+});
+
+document.getElementById('btn-encerrar-partida').addEventListener('click', function () {
+  const btn = document.getElementById('btn-encerrar-partida');
+  runGuardedAction(btn, async function () {
+    if (!isHost) return;
+
+    const confirmed = confirm('Tem certeza que deseja encerrar a partida?');
+    if (!confirmed) return;
+
+    btn.textContent = 'Encerrando...';
+
+    // Usa o sistema de pódio já existente — o ranking sai do saldo
+    // ATUAL de cada jogador (não espera nenhuma mão em andamento
+    // terminar; se havia uma aposta no meio, esse dinheiro não é
+    // devolvido — o Host decidiu encerrar assim mesmo).
+    const finalResults = buildFinalResults(playersCache, winCondition);
+
+    await supabaseClient
+      .from('rooms')
+      .update({
+        game_status: 'finished',
+        final_results: finalResults,
+        hand_state: HAND_STATE.NO_HAND,
+        current_turn_seat: null,
+        dealer_seat: null
+      })
+      .eq('id', roomCode);
+
+    gameStatus = 'finished';
+    handState = HAND_STATE.NO_HAND;
+    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+    window.location.href = 'lobby.html';
   });
 });
 

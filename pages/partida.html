@@ -50,8 +50,9 @@
         <p class="text-cream/50 text-[11px] font-body">Sala</p>
         <div class="flex items-center gap-2">
           <p id="room-code-display" class="font-display text-cream text-lg tracking-widest">------</p>
-          <button id="btn-generate-code" title="Gerar novo código (expulsa quem tentar entrar com o antigo)"
-            class="hidden text-gold/70 text-xs font-body underline">novo código</button>
+          <button id="btn-open-room-settings" title="Configurações da sala"
+            aria-label="Configurações da sala"
+            class="hidden w-6 h-6 rounded-full border border-gold/40 text-gold text-xs text-center leading-6">⚙</button>
         </div>
         <a id="link-leave-room" href="home.html" class="text-cream/30 text-[10px] font-body underline">sair da sala</a>
       </div>
@@ -344,6 +345,38 @@
           </div>
         </li>
       </ol>
+
+    </div>
+  </div>
+
+
+  <!-- ======================================================= -->
+  <!-- MODAL: Configurações da Sala (só o Host)                 -->
+  <!-- ======================================================= -->
+  <div id="modal-room-settings" class="hidden fixed inset-0 z-50 items-center justify-center px-4 modal-backdrop">
+    <div class="table-rail bg-felt w-full max-w-sm p-5">
+
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display text-cream text-xl">Configurações da sala</h2>
+        <button id="btn-close-room-settings" aria-label="Fechar"
+          class="w-8 h-8 rounded-full border border-cream/20 text-cream/70 font-body">✕</button>
+      </div>
+
+      <button id="btn-trocar-codigo" type="button"
+        class="w-full border border-gold/40 text-gold font-body font-semibold text-sm py-2.5 rounded-lg mb-2">
+        Trocar código da sala
+      </button>
+      <p class="text-cream/40 text-[11px] font-body mb-4">
+        Gera um código novo. Quem já está na mesa continua — só quem tentar entrar com o código antigo é bloqueado.
+      </p>
+
+      <button id="btn-encerrar-partida" type="button"
+        class="w-full border border-burgundy text-burgundy font-body font-semibold text-sm py-2.5 rounded-lg">
+        Encerrar partida
+      </button>
+      <p class="text-cream/40 text-[11px] font-body mt-1">
+        Encerra o jogo agora e mostra o pódio com o placar atual.
+      </p>
 
     </div>
   </div>
