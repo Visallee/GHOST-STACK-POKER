@@ -14,6 +14,20 @@
 import { supabaseClient } from './supabase.js';
 import { loadSession, clearSession } from './session.js';
 
+// ---------- REDE DE SEGURANÇA CONTRA ERRO ENGOLIDO ----------
+// Sem isso, uma exceção JS solta (ex: erro de referência, erro de
+// rede não tratado) simplesmente "morre" no meio do await e o botão
+// fica travado pra sempre em "Abrindo mesa..." sem nenhum aviso.
+window.addEventListener('error', function (event) {
+  console.error('[GhostStackPoker] Erro não tratado:', event.error || event.message);
+  alert('⚠️ Erro inesperado: ' + (event.error ? event.error.message : event.message) + '\n\n(Detalhes no Console — F12 → Console.)');
+});
+window.addEventListener('unhandledrejection', function (event) {
+  console.error('[GhostStackPoker] Promise rejeitada sem tratamento:', event.reason);
+  const msg = (event.reason && event.reason.message) ? event.reason.message : String(event.reason);
+  alert('⚠️ Uma operação falhou sem aviso: ' + msg + '\n\n(Detalhes no Console — F12 → Console.)');
+});
+
 
 // ---------- 1. SESSÃO: só o Host pode estar aqui ----------
 
@@ -112,7 +126,6 @@ function showConfigError(message) {
 btnOpenTable.addEventListener('click', async function () {
   const startingChips = Number(slider.value);
   const allowKick = document.getElementById('toggle-allow-kick').checked;
-  const allowDonations = document.getElementById('toggle-allow-donations').checked;
   const anteAmount = Math.max(0, Number(document.getElementById('input-ante').value) || 0);
   const maxPlayers = Math.min(20, Math.max(2, Number(document.getElementById('input-max-players').value) || 8));
   const roundLimit = winCondition === 'round_limit'
@@ -122,46 +135,57 @@ btnOpenTable.addEventListener('click', async function () {
   btnOpenTable.disabled = true;
   btnOpenTable.textContent = 'Abrindo mesa...';
 
-  // Salva as regras da sala. Note que "chip_values"/"chip_counts" não
-  // são mais enviados — essas colunas continuam existindo no banco
-  // (inofensivas, sem uso), mas o jogo não lê mais elas.
-  const { error: roomError } = await supabaseClient
-    .from('rooms')
-    .update({
-      status: 'open',
-      host_id: myPlayerId,
-      allow_kick: allowKick,
-      allow_donations: allowDonations,
-      starting_chips: startingChips,
-      max_players: maxPlayers,
-      ante_amount: anteAmount,
-      win_condition: winCondition,
-      round_limit: roundLimit
-    })
-    .eq('id', roomCode);
+  try {
+    // Salva as regras da sala. Note que "chip_values"/"chip_counts" não
+    // são mais enviados — essas colunas continuam existindo no banco
+    // (inofensivas, sem uso), mas o jogo não lê mais elas.
+    const { error: roomError } = await supabaseClient
+      .from('rooms')
+      .update({
+        status: 'open',
+        host_id: myPlayerId,
+        allow_kick: allowKick,
+        starting_chips: startingChips,
+        max_players: maxPlayers,
+        ante_amount: anteAmount,
+        win_condition: winCondition,
+        round_limit: roundLimit
+      })
+      .eq('id', roomCode);
 
-  if (roomError) {
-    btnOpenTable.disabled = false;
-    btnOpenTable.textContent = 'Abrir Mesa';
-    showConfigError('Não foi possível salvar as configurações: ' + roomError.message);
-    return;
+    if (roomError) {
+      showConfigError('Não foi possível salvar as configurações: ' + roomError.message);
+      return;
+    }
+
+    // O host também é jogador — garante que o saldo dele já nasce
+    // com o valor definido aqui (e não com o 1000 padrão do cadastro).
+    const { error: playerError } = await supabaseClient
+      .from('players')
+      .update({ chips: startingChips, is_host: true })
+      .eq('id', myPlayerId);
+
+    if (playerError) {
+      showConfigError('Não foi possível atualizar seu saldo: ' + playerError.message);
+      return;
+    }
+
+    window.location.href = 'partida.html';
+  } catch (unexpectedError) {
+    // Rede de segurança: qualquer erro que NÃO veio como {error} do
+    // Supabase (ex: exceção JS de verdade) cai aqui — antes disso não
+    // existia, e era exatamente o que deixava o botão travado pra
+    // sempre em "Abrindo mesa..." sem mostrar nada.
+    console.error('[GhostStackPoker] Erro inesperado ao abrir a mesa:', unexpectedError);
+    showConfigError('Erro inesperado ao abrir a mesa: ' + unexpectedError.message + ' (veja o Console pra mais detalhes)');
+  } finally {
+    // SEMPRE reabilita o botão, aconteça o que acontecer — só não
+    // reabilita se a navegação pra partida.html já foi disparada.
+    if (!window.location.href.includes('partida.html')) {
+      btnOpenTable.disabled = false;
+      btnOpenTable.textContent = 'Abrir Mesa';
+    }
   }
-
-  // O host também é jogador — garante que o saldo dele já nasce
-  // com o valor definido aqui (e não com o 1000 padrão do cadastro).
-  const { error: playerError } = await supabaseClient
-    .from('players')
-    .update({ chips: startingChips, is_host: true })
-    .eq('id', myPlayerId);
-
-  if (playerError) {
-    btnOpenTable.disabled = false;
-    btnOpenTable.textContent = 'Abrir Mesa';
-    showConfigError('Não foi possível atualizar seu saldo: ' + playerError.message);
-    return;
-  }
-
-  window.location.href = 'partida.html';
 });
 
 

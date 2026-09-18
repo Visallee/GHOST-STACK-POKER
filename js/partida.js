@@ -17,6 +17,32 @@ import { getAmountToCall, validateBetAmount } from './betting.js';
 import { getTableMaxBet, applyActionToRound, isBettingRoundClosed, getNextSeatToAct } from './betting-round.js';
 import { HAND_STATE } from './hand-state.js';
 
+// ---------- REDE DE SEGURANÇA CONTRA ERRO ENGOLIDO ----------
+// Qualquer exceção JS não tratada (throw solto) ou Promise rejeitada
+// sem .catch() nesta página agora aparece num alert(), em vez de só
+// morrer silenciosamente no console sem ninguém perceber. Isso é
+// justamente o que fazia o app "travar sem explicação" — o erro
+// existia, só não tinha jeito nenhum de saber sem abrir o DevTools.
+window.addEventListener('error', function (event) {
+  console.error('[GhostStackPoker] Erro não tratado:', event.error || event.message);
+  reportCriticalErrorOnce('window-error', 'Erro inesperado na página: ' + (event.error ? event.error.message : event.message));
+});
+window.addEventListener('unhandledrejection', function (event) {
+  console.error('[GhostStackPoker] Promise rejeitada sem tratamento:', event.reason);
+  const msg = (event.reason && event.reason.message) ? event.reason.message : String(event.reason);
+  reportCriticalErrorOnce('unhandled-rejection', 'Uma operação falhou sem aviso: ' + msg);
+});
+
+const shownErrorKeys = new Set();
+// Mostra um alert() de erro crítico, mas só a PRIMEIRA vez pra cada
+// "key" — evita alagar a tela de alerts repetidos quando o Realtime
+// tenta de novo a cada mudança na sala.
+function reportCriticalErrorOnce(key, message) {
+  if (shownErrorKeys.has(key)) return;
+  shownErrorKeys.add(key);
+  alert('⚠️ ' + message + '\n\n(Detalhes completos no Console do navegador — F12 → Console.)');
+}
+
 const session = loadSession();
 
 if (!session) {
@@ -1281,7 +1307,12 @@ async function refreshPlayers() {
     .eq('room_code', roomCode)
     .order('joined_at', { ascending: true });
 
-  if (error || !data) return;
+  if (error) {
+    console.error('[GhostStackPoker] Falha ao buscar jogadores da sala:', error);
+    reportCriticalErrorOnce('players-fetch', 'Não consegui carregar os jogadores da sala: ' + error.message);
+    return;
+  }
+  if (!data) return;
 
   const me = data.find(function (p) { return p.id === myPlayerId; });
 
@@ -1334,7 +1365,16 @@ async function refreshRoomInfo() {
     .eq('id', roomCode)
     .single();
 
-  if (error || !room) return;
+  if (error) {
+    console.error('[GhostStackPoker] Falha ao buscar dados da sala:', error);
+    reportCriticalErrorOnce('room-fetch', 'Não consegui carregar os dados da sala (código "' + roomCode + '"): ' + error.message);
+    return;
+  }
+  if (!room) {
+    console.error('[GhostStackPoker] Sala não encontrada no banco para o id:', roomCode);
+    reportCriticalErrorOnce('room-missing', 'Esta sala não foi encontrada no banco de dados. Pode ser que a criação da sala tenha falhado — volte pro Lobby e tente criar de novo.');
+    return;
+  }
 
   joinCode = room.join_code;
   potTotal = room.pot;
