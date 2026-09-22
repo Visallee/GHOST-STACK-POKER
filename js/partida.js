@@ -16,6 +16,14 @@ import { evaluateWinCondition, buildFinalResults } from './win-condition.js';
 import { getAmountToCall, validateBetAmount } from './betting.js';
 import { getTableMaxBet, applyActionToRound, isBettingRoundClosed, getNextSeatToAct } from './betting-round.js';
 import { HAND_STATE } from './hand-state.js';
+import {
+  AFK_KICK_THRESHOLD_MS,
+  getAfkRemainingMs,
+  isPlayerAfk,
+  shouldShowAfkWarning,
+  formatCountdown,
+  computeNextHostByJoinOrder
+} from './presence.js';
 
 // ---------- REDE DE SEGURANÇA CONTRA ERRO ENGOLIDO ----------
 // Qualquer exceção JS não tratada (throw solto) ou Promise rejeitada
@@ -62,6 +70,12 @@ let hasFolded = false;
 let currentCallAmount = 0;
 let playersCache = [];
 let realtimeChannel = null;
+
+// ----- Presença/AFK (Fase 7.5) -----
+let previousPlayerCount = null; // usado só pra detectar a TRANSIÇÃO 2+ -> 1 (nunca dispara se a sala já começou sozinha)
+let heartbeatInterval = null;
+let presenceCheckInterval = null;
+let countdownTickInterval = null;
 
 let joinCode = '------';
 let anteCollected = false;
@@ -402,6 +416,10 @@ function renderLeaderboard(players) {
       ? '<button class="btn-approve-rebuy text-gold text-[10px] font-body underline ml-2" type="button" data-player-id="' + p.id + '">aprovar volta</button>'
       : '';
 
+    const afkHtml = (!isMe && shouldShowAfkWarning(p.last_seen_at, Date.now()))
+      ? '<p class="afk-countdown text-burgundy text-[10px] font-body font-semibold mt-0.5" data-last-seen-at="' + p.last_seen_at + '">expulso em ' + formatCountdown(getAfkRemainingMs(p.last_seen_at, Date.now())) + '</p>'
+      : '';
+
     card.innerHTML =
       '<div class="flex items-center gap-2">' +
         '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
@@ -413,6 +431,7 @@ function renderLeaderboard(players) {
         '<div class="text-right">' +
           '<p class="text-cream font-display text-base leading-none">' + formatMoney(p.chips) + '</p>' +
           '<p class="' + statusClass + ' text-[11px] font-body">' + statusText + '</p>' +
+          afkHtml +
         '</div>' +
         approveRebuyHtml +
         kickButtonHtml +
@@ -1300,6 +1319,161 @@ btnConfirmTransfer.addEventListener('click', function () {
   });
 });
 
+// ---------- 15B. PRESENÇA / AFK (Fase 7.5) ----------
+//
+// Sem servidor rodando um relógio, o "presente/ausente" é calculado
+// por QUALQUER cliente a partir de players.last_seen_at (o heartbeat).
+// Pra não ter corrida (2 clientes tentando expulsar/promover ao mesmo
+// tempo), a responsabilidade é sempre de UMA pessoa só por vez:
+// - Se o Host atual está AFK: só quem SERIA o próximo Host (calculado
+//   de forma determinística, por ordem de entrada) age.
+// - Se o Host está presente: só o próprio Host expulsa jogadores AFK.
+
+// Manda "estou aqui" pro banco. Chamado no carregamento da página, a
+// cada ~15s enquanto a aba está visível, e assim que ela volta a ficar
+// visível depois de minimizada.
+async function sendHeartbeat() {
+  await supabaseClient
+    .from('players')
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq('id', myPlayerId);
+}
+
+async function promoteMeToHost(oldHostId) {
+  await supabaseClient.from('players').update({ is_host: false }).eq('id', oldHostId);
+  await supabaseClient.from('players').update({ is_host: true }).eq('id', myPlayerId);
+  await supabaseClient.from('rooms').update({ host_id: myPlayerId }).eq('id', roomCode);
+  // isHost/renderHostUI já se atualizam sozinhos no próximo refreshPlayers()
+  // (é o mesmo mecanismo que já existia pra transferência manual de Host).
+}
+
+// Expulsa quem está AFK — reaproveita a mesma lógica de recuperação de
+// turno do handleKickPlayer manual, só que sem o confirm() (não tem
+// ninguém pra confirmar um clique que ninguém deu).
+async function kickAfkPlayer(afkPlayer) {
+  await supabaseClient.from('players').delete().eq('id', afkPlayer.id);
+
+  if (afkPlayer.seat_number === currentTurnSeat && handState === HAND_STATE.BETTING) {
+    const occupiedSeats = getOccupiedSeats(playersCache);
+    const maxBet = getMaxTableBet();
+    const nextSeat = getNextSeatToAct(occupiedSeats, playersCache, maxBet, afkPlayer.seat_number);
+
+    currentTurnSeat = nextSeat;
+    handState = nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
+
+    await supabaseClient
+      .from('rooms')
+      .update({ current_turn_seat: nextSeat, hand_state: handState })
+      .eq('id', roomCode);
+  }
+}
+
+// Rodada de checagem periódica — todo cliente roda isso, mas só UM
+// deles (o determinado pelas regras acima) realmente faz alguma coisa
+// a cada ciclo.
+async function checkPresence() {
+  if (!playersCache || playersCache.length === 0) return;
+
+  const nowMs = Date.now();
+  const currentHost = playersCache.find(function (p) { return p.is_host; });
+
+  if (currentHost && isPlayerAfk(currentHost.last_seen_at, nowMs)) {
+    // O Host está AFK — só quem seria o PRÓXIMO Host (o mais antigo
+    // entre os presentes) age; todo mundo mais só observa este ciclo.
+    const nextHostId = computeNextHostByJoinOrder(playersCache, nowMs, currentHost.id);
+    if (nextHostId === myPlayerId) {
+      await promoteMeToHost(currentHost.id);
+    }
+    return;
+  }
+
+  // Host presente — só ELE cuida de expulsar quem estiver AFK (evita
+  // dois clientes tentando expulsar a mesma pessoa ao mesmo tempo).
+  if (!isHost) return;
+  if (playersCache.length <= 1) return; // nunca expulsa o único jogador restante
+
+  const afkPlayer = playersCache.find(function (p) {
+    return p.id !== myPlayerId && isPlayerAfk(p.last_seen_at, nowMs);
+  });
+
+  if (afkPlayer) {
+    await kickAfkPlayer(afkPlayer);
+  }
+}
+
+// Só atualiza os textos dos contadores vermelhos (não redesenha o
+// placar inteiro) — chamado a cada segundo, só pra manter o "2:15"
+// contando pra baixo mesmo entre uma atualização de dados e outra.
+function tickAfkCountdowns() {
+  const nowMs = Date.now();
+  document.querySelectorAll('.afk-countdown').forEach(function (el) {
+    const lastSeenAt = el.dataset.lastSeenAt;
+    if (!lastSeenAt) return;
+    const remaining = getAfkRemainingMs(lastSeenAt, nowMs);
+    el.textContent = 'expulso em ' + formatCountdown(remaining);
+  });
+}
+
+// Quando a sala passa de 2+ jogadores pra exatamente 1 (por expulsão
+// automática, expulsão manual, ou saída voluntária de todo mundo), o
+// único que sobrou vira Host e ganha a partida com o que tiver.
+async function handleSoloWinner(soloPlayer) {
+  if (!soloPlayer.is_host) {
+    await supabaseClient.from('players').update({ is_host: true }).eq('id', soloPlayer.id);
+  }
+
+  const { data: roomRow } = await supabaseClient
+    .from('rooms').select('pot').eq('id', roomCode).single();
+  const potAmount = roomRow ? roomRow.pot : potTotal;
+
+  const finalChips = soloPlayer.chips + potAmount;
+  const finalResults = [{ player_id: soloPlayer.id, name: soloPlayer.name, chips: finalChips, rank: 1 }];
+
+  await supabaseClient.from('players').update({ chips: finalChips, current_bet: 0 }).eq('id', soloPlayer.id);
+
+  await supabaseClient
+    .from('rooms')
+    .update({
+      host_id: soloPlayer.id,
+      pot: 0,
+      game_status: 'finished',
+      final_results: finalResults,
+      hand_state: HAND_STATE.NO_HAND,
+      current_turn_seat: null,
+      dealer_seat: null
+    })
+    .eq('id', roomCode);
+
+  if (soloPlayer.id === myPlayerId) {
+    gameStatus = 'finished';
+    handState = HAND_STATE.NO_HAND;
+    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (presenceCheckInterval) clearInterval(presenceCheckInterval);
+    if (countdownTickInterval) clearInterval(countdownTickInterval);
+    window.location.href = 'lobby.html';
+  }
+}
+
+function startPresenceSystem() {
+  sendHeartbeat();
+
+  heartbeatInterval = setInterval(function () {
+    if (!document.hidden) sendHeartbeat();
+  }, 15000);
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) sendHeartbeat();
+  });
+
+  presenceCheckInterval = setInterval(function () {
+    checkPresence();
+  }, 10000);
+
+  countdownTickInterval = setInterval(tickAfkCountdowns, 1000);
+}
+
+
 async function refreshPlayers() {
   const { data, error } = await supabaseClient
     .from('players')
@@ -1327,6 +1501,16 @@ async function refreshPlayers() {
   playersCache = data;
   renderLeaderboard(data);
   renderGivePotPanel();
+
+  // Detecta a TRANSIÇÃO de 2+ jogadores pra exatamente 1 (por expulsão
+  // automática de AFK, expulsão manual, ou saída voluntária de todo
+  // mundo). Comparar com "1 == data.length" sozinho dispararia toda
+  // vez, inclusive quando alguém cria e testa uma sala sozinho desde o
+  // início — por isso a checagem exige que ANTES fosse mais de 1.
+  if (previousPlayerCount !== null && previousPlayerCount > 1 && data.length === 1) {
+    handleSoloWinner(data[0]);
+  }
+  previousPlayerCount = data.length;
 
   if (me.is_host !== isHost) {
     isHost = me.is_host;
@@ -1453,3 +1637,4 @@ renderHostUI();
 refreshRoomInfo();
 subscribeToRoom();
 refreshPlayers();
+startPresenceSystem();
