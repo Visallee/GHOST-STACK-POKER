@@ -1,3 +1,7 @@
+// ===========================================================
+// GhostStackPoker — js/partida.js
+// ===========================================================
+
 import { supabaseClient } from "./supabase.js";
 import { loadSession, saveSession, clearSession } from "./session.js";
 import { generateRoomCode } from "./room-code.js";
@@ -7,6 +11,7 @@ import {
   getActiveSeats,
   computeNextDealerSeat,
   computeBlindSeats,
+  getNextTurnSeat,
 } from "./turn.js";
 import { computeSidePots, splitPotAmongWinners } from "./pots.js";
 import { evaluateWinCondition, buildFinalResults } from "./win-condition.js";
@@ -95,9 +100,6 @@ let allowKick = false;
 let selectedNewHostId = null;
 
 let isProcessingAction = false;
-
-// Estado de controle para o Modal de Transferência (Fase 7.2)
-// Pode ser 'leave' (sair do jogo) ou 'stay' (apenas transferir controle)
 let transferMode = "leave";
 
 async function runGuardedAction(button, fn) {
@@ -1309,9 +1311,6 @@ document
     });
   });
 
-// ==========================================
-// FASE 7.1 — ENCERRAMENTO SEGURO DA PARTIDA
-// ==========================================
 document
   .getElementById("btn-encerrar-partida")
   .addEventListener("click", function () {
@@ -1501,16 +1500,11 @@ rulesModal.addEventListener("click", function (event) {
   if (event.target === rulesModal) closeRulesModal();
 });
 
-// ==========================================
-// FASE 7.2 — TRANSFERÊNCIA DE HOST DURANTE A PARTIDA
-// ==========================================
 const transferModal = document.getElementById("modal-transfer-host");
 const transferList = document.getElementById("transfer-host-list");
 const transferIntro = document.getElementById("transfer-host-intro");
 const transferTitle = document.getElementById("transfer-host-title");
 const btnConfirmTransfer = document.getElementById("btn-confirm-transfer");
-
-let transferMode = "leave";
 
 function openTransferModal(mode = "leave") {
   transferMode = mode;
