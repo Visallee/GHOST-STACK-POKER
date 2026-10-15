@@ -44,14 +44,12 @@ document
 
     const newCode = generateRoomCode();
 
-    const { error: roomError } = await supabaseClient
-      .from("rooms")
-      .insert({
-        id: newCode,
-        join_code: newCode,
-        pot: 0,
-        hand_state: "no_hand",
-      });
+    const { error: roomError } = await supabaseClient.from("rooms").insert({
+      id: newCode,
+      join_code: newCode,
+      pot: 0,
+      hand_state: "no_hand",
+    });
 
     if (roomError) {
       setButtonLoading(btn, false);
@@ -64,9 +62,6 @@ document
       {
         p_room_code: newCode,
         p_name: name,
-        p_chips: 1000,
-        p_is_host: true,
-        p_sitting_out: false,
       },
     );
 
@@ -133,24 +128,17 @@ document
       return;
     }
 
-    // Se houver mão em andamento, o novo jogador entra em quarentena de espera
-    const isMidHand = roomRow.hand_state !== "no_hand";
-
     const { data: playerRow, error: playerError } = await supabaseClient.rpc(
       "join_room_secure",
       {
         p_room_code: roomRow.id,
         p_name: name,
-        p_chips: roomRow.starting_chips,
-        p_is_host: false,
-        p_sitting_out: isMidHand,
       },
     );
 
     setButtonLoading(btn, false);
 
     if (playerError) {
-      // Apanha erros de concorrência ou constraint da base de dados
       showHomeError(
         "Conflito de entrada na mesa. Tente novamente: " + playerError.message,
       );
