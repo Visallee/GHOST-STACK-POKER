@@ -45,7 +45,7 @@ export function getActiveSeats(players) {
 // "fromSeat" não existir mais na lista (ex: jogador foi expulso),
 // usa a posição lógica onde ele "entraria" como referência, em vez de
 // quebrar.
-function nextSeatInRing(occupiedSeatsSorted, fromSeat) {
+export function nextSeatInRing(occupiedSeatsSorted, fromSeat) {
   const n = occupiedSeatsSorted.length;
   if (n === 0) return null;
   if (n === 1) return occupiedSeatsSorted[0];

@@ -403,12 +403,12 @@ function renderLeaderboard(players) {
     const showKick = isHost && allowKick && !isMe;
     const kickButtonHtml = showKick
       ? '<button class="btn-kick-player" type="button" aria-label="Expulsar ' + escapeHtml(p.name) + '" title="Expulsar jogador" data-player-id="' + p.id + '" data-player-name="' + escapeHtml(p.name) + '">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-            '<path d="M16 17l5-5-5-5"/>' +
-            '<path d="M21 12H9"/>' +
-            '<path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/>' +
-          '</svg>' +
-        '</button>'
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M16 17l5-5-5-5"/>' +
+      '<path d="M21 12H9"/>' +
+      '<path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/>' +
+      '</svg>' +
+      '</button>'
       : '';
 
     const showApproveRebuy = isHost && p.is_eliminated && p.needs_rebuy_approval;
@@ -422,19 +422,19 @@ function renderLeaderboard(players) {
 
     card.innerHTML =
       '<div class="flex items-center gap-2">' +
-        '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
-        '<span class="text-cream font-body font-medium text-sm' + (p.is_eliminated ? ' opacity-40 line-through' : '') + '">' + escapeHtml(p.name) + (isMe ? ' (você)' : '') + (p.is_host ? ' 👑' : '') + '</span>' +
-        dealerBadgeHtml +
-        turnBadgeHtml +
+      '<span class="w-2 h-2 rounded-full ' + (isMe ? 'bg-gold' : (p.is_host ? 'bg-burgundy' : 'bg-cream/20')) + '"></span>' +
+      '<span class="text-cream font-body font-medium text-sm' + (p.is_eliminated ? ' opacity-40 line-through' : '') + '">' + escapeHtml(p.name) + (isMe ? ' (você)' : '') + (p.is_host ? ' 👑' : '') + '</span>' +
+      dealerBadgeHtml +
+      turnBadgeHtml +
       '</div>' +
       '<div class="flex items-center">' +
-        '<div class="text-right">' +
-          '<p class="text-cream font-display text-base leading-none">' + formatMoney(p.chips) + '</p>' +
-          '<p class="' + statusClass + ' text-[11px] font-body">' + statusText + '</p>' +
-          afkHtml +
-        '</div>' +
-        approveRebuyHtml +
-        kickButtonHtml +
+      '<div class="text-right">' +
+      '<p class="text-cream font-display text-base leading-none">' + formatMoney(p.chips) + '</p>' +
+      '<p class="' + statusClass + ' text-[11px] font-body">' + statusText + '</p>' +
+      afkHtml +
+      '</div>' +
+      approveRebuyHtml +
+      kickButtonHtml +
       '</div>';
 
     listEl.appendChild(card);
@@ -593,8 +593,29 @@ document.getElementById('btn-clear-bet').addEventListener('click', function () {
   renderChipsUI();
 });
 
+function getTurnNotAllowedReason() {
+  if (handState === HAND_STATE.NO_HAND) {
+    return 'A mão ainda não começou. O Host precisa clicar em "Iniciar Mão" acima.';
+  }
+  if (handState === HAND_STATE.WAITING_FOR_ANTE) {
+    return 'Aguardando o Host clicar em "Cobrar Antes" para iniciar as apostas.';
+  }
+  if (handState === HAND_STATE.ROUND_COMPLETE) {
+    return 'A rodada de apostas encerrou. Aguardando o Host entregar o pote.';
+  }
+  const turnPlayer = getCurrentTurnPlayer();
+  if (turnPlayer) {
+    return 'Aguarde: agora é a vez de ' + turnPlayer.name + ' agir.';
+  }
+  return 'Não é sua vez de agir neste momento.';
+}
+
 document.getElementById('btn-action-raise').addEventListener('click', function () {
-  if (!isMyTurn()) return;
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
   if (document.getElementById('btn-action-raise').disabled) return;
   showRaisePanel();
 });
@@ -607,6 +628,11 @@ document.getElementById('btn-raise-back').addEventListener('click', function () 
 
 document.getElementById('btn-confirm-bet').addEventListener('click', function () {
   const button = document.getElementById('btn-confirm-bet');
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
   runGuardedAction(button, async function () {
     if (!isMyTurn()) return;
     if (currentBet <= 0) return;
@@ -659,6 +685,11 @@ document.getElementById('btn-confirm-bet').addEventListener('click', function ()
 
 document.getElementById('btn-action-call').addEventListener('click', function () {
   const button = document.getElementById('btn-action-call');
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
   runGuardedAction(button, async function () {
     if (!isMyTurn()) return;
     if (button.disabled) return;
@@ -711,6 +742,11 @@ document.getElementById('btn-action-call').addEventListener('click', function ()
 
 document.getElementById('btn-action-allin').addEventListener('click', function () {
   const button = document.getElementById('btn-action-allin');
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
   runGuardedAction(button, async function () {
     if (!isMyTurn()) return;
     if (button.disabled) return;
@@ -748,6 +784,11 @@ document.getElementById('btn-action-allin').addEventListener('click', function (
 
 document.getElementById('btn-action-fold').addEventListener('click', function () {
   const foldBtn = document.getElementById('btn-action-fold');
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
   runGuardedAction(foldBtn, async function () {
     if (!isMyTurn()) return;
 
@@ -850,6 +891,21 @@ document.getElementById('btn-force-ante').addEventListener('click', function () 
         .eq('id', p.id);
     }));
 
+    // Atualização otimista local imediata: garante que a tela e os turnos
+    // usem os saldos/apostas atualizados pelo Ante mesmo antes do Realtime responder
+    playersCache = playersCache.map(function (p) {
+      if (p.folded || p.is_eliminated) return p;
+      return Object.assign({}, p, {
+        chips: p.chips - anteAmount,
+        current_bet: p.current_bet + anteAmount,
+        has_acted_this_round: false
+      });
+    });
+
+    const totalAnteCollected = anteAmount * activePlayers.length;
+    potTotal = (roomRow.pot || 0) + totalAnteCollected;
+    renderPotUI();
+
     // Agora sim: calcula quem age primeiro e libera o turno de verdade.
     const activeSeatsNow = getActiveSeats(playersCache);
     const firstToActSeat = computeBlindSeats(activeSeatsNow, dealerSeat).firstToActSeat;
@@ -857,7 +913,7 @@ document.getElementById('btn-force-ante').addEventListener('click', function () 
     await supabaseClient
       .from('rooms')
       .update({
-        pot: roomRow.pot + (anteAmount * activePlayers.length),
+        pot: potTotal,
         ante_collected: true,
         hand_state: HAND_STATE.BETTING,
         current_turn_seat: firstToActSeat
@@ -1632,9 +1688,29 @@ function subscribeToRoom() {
     .subscribe();
 }
 
+let tableSyncInterval = null;
+
+// Sincronização periódica de fallback (a cada 2.5s) — se o WebSocket do
+// Supabase Realtime atrasar, desconectar ou não disparar entre duas abas/aparelhos,
+// este polling garante que a passagem de turnos e os saldos atualizem sozinhos.
+function startTableSyncPolling() {
+  if (tableSyncInterval) clearInterval(tableSyncInterval);
+  tableSyncInterval = setInterval(async function () {
+    if (document.hidden) return;
+    if (isProcessingAction) return;
+    try {
+      await refreshRoomInfo();
+      await refreshPlayers();
+    } catch (e) {
+      console.warn('[GhostStackPoker] Polling de sincronização encontrou aviso leve:', e);
+    }
+  }, 2500);
+}
+
 renderChipsUI();
 renderHostUI();
 refreshRoomInfo();
 subscribeToRoom();
 refreshPlayers();
 startPresenceSystem();
+startTableSyncPolling();
