@@ -1,5 +1,5 @@
 // ===========================================================
-// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Visual Blindado)
+// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Fix Polling UI)
 // ===========================================================
 
 import { supabaseClient } from "./supabase.js";
@@ -1177,7 +1177,6 @@ document.getElementById("btn-trocar-codigo").addEventListener("click", () => {
   });
 });
 
-// INTEGRIDADE FINANCEIRA: Bloqueio Seguro do Encerramento Manual
 document
   .getElementById("btn-encerrar-partida")
   .addEventListener("click", () => {
@@ -1703,7 +1702,7 @@ async function refreshRoomInfo() {
   checkGameFinishedStatus();
 }
 
-// FASE 8: Tela de Resultados Dinâmica e Reconfiguração (Correção Visual Absoluta)
+// FASE 8: Tela de Resultados com Preservação de DOM (Fix Polling)
 function checkGameFinishedStatus() {
   let overlay = document.getElementById("final-results-overlay");
 
@@ -1718,12 +1717,17 @@ function checkGameFinishedStatus() {
     document.body.appendChild(overlay);
   }
 
-  // PATCH VISUAL: Limpa qualquer classe que esteja a gerar conflito ou cache
   overlay.className = "";
-  // Força os estilos absolutos usando !important em cada propriedade para sobrepor a mesa
   overlay.style.cssText =
     "position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background-color: #0F291E !important; z-index: 999999 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: flex-start !important; padding: 24px !important; overflow-y: auto !important; font-family: ui-sans-serif, system-ui, sans-serif !important;";
 
+  // TRAVA MÁGICA: Se o painel já existe, mostramos e não destruímos nada para não apagar o que o utilizador digitou
+  if (document.getElementById("reconfig-panel-container")) {
+    overlay.style.display = "flex";
+    return;
+  }
+
+  overlay.style.display = "flex";
   overlay.innerHTML = "";
 
   const title = document.createElement("h2");
@@ -1749,15 +1753,24 @@ function checkGameFinishedStatus() {
     overlay.appendChild(list);
   }
 
+  // Contentor fixo para não ser apagado no próximo ciclo
+  const panelContainer = document.createElement("div");
+  panelContainer.id = "reconfig-panel-container";
+  panelContainer.style.cssText =
+    "width: 100%; max-width: 28rem; display: flex; flex-direction: column; align-items: center;";
+  overlay.appendChild(panelContainer);
+
   if (isHost) {
     const configPanel = document.createElement("div");
     configPanel.style.cssText =
-      "background-color: #163829 !important; padding: 20px !important; border-radius: 0.75rem !important; width: 100% !important; max-width: 28rem !important; border: 1px solid rgba(201, 162, 39, 0.2) !important; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important; box-sizing: border-box !important;";
+      "background-color: #163829 !important; padding: 20px !important; border-radius: 0.75rem !important; width: 100% !important; border: 1px solid rgba(201, 162, 39, 0.2) !important; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important; box-sizing: border-box !important;";
+
+    // NOTA: O input "reconfig-preserve-chips" NÃO tem a tag "checked" aqui para iniciar desactivado
     configPanel.innerHTML = `
       <h3 style="color: #F1EBE1 !important; font-size: 1.125rem !important; margin-bottom: 16px !important; text-align: center !important; font-weight: 600 !important;">Configurar Nova Partida</h3>
       
       <div style="margin-bottom: 16px !important; display: flex !important; align-items: center !important; gap: 8px !important; background-color: #0F291E !important; padding: 12px !important; border-radius: 0.25rem !important;">
-        <input type="checkbox" id="reconfig-preserve-chips" checked style="width: 1.25rem !important; height: 1.25rem !important; accent-color: #C9A227 !important; cursor: pointer !important; flex-shrink: 0 !important;">
+        <input type="checkbox" id="reconfig-preserve-chips" style="width: 1.25rem !important; height: 1.25rem !important; accent-color: #C9A227 !important; cursor: pointer !important; flex-shrink: 0 !important;">
         <label for="reconfig-preserve-chips" style="color: #F1EBE1 !important; font-size: 0.875rem !important; cursor: pointer !important; user-select: none !important;">Preservar saldos finais da partida anterior</label>
       </div>
       
@@ -1773,7 +1786,7 @@ function checkGameFinishedStatus() {
       
       <button id="btn-reconfig-start" style="width: 100% !important; background-color: #C9A227 !important; color: #0A110E !important; font-weight: bold !important; padding: 12px !important; border-radius: 0.5rem !important; border: none !important; cursor: pointer !important; font-size: 1rem !important;">Iniciar Nova Partida na mesma mesa</button>
     `;
-    overlay.appendChild(configPanel);
+    panelContainer.appendChild(configPanel);
 
     document
       .getElementById("btn-reconfig-start")
@@ -1846,7 +1859,7 @@ function checkGameFinishedStatus() {
       "color: rgba(241, 235, 225, 0.6) !important; text-align: center !important; margin-top: 32px !important; padding: 0 16px !important;";
     waitMsg.textContent =
       "Aguardando o Host reconfigurar a sala para uma nova partida...";
-    overlay.appendChild(waitMsg);
+    panelContainer.appendChild(waitMsg);
   }
 
   const leaveBtn = document.createElement("button");
@@ -1859,7 +1872,7 @@ function checkGameFinishedStatus() {
     clearSession();
     window.location.href = "home.html";
   });
-  overlay.appendChild(leaveBtn);
+  panelContainer.appendChild(leaveBtn);
 }
 
 function subscribeToRoom() {
