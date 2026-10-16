@@ -1,5 +1,5 @@
 // ===========================================================
-// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Fix Polling UI)
+// GhostStackPoker — js/partida.js (Correção de Turnos, All-In e Encerramento)
 // ===========================================================
 
 import { supabaseClient } from "./supabase.js";
@@ -194,7 +194,35 @@ function renderPotUI() {
 }
 
 function renderRoomCodeUI() {
-  document.getElementById("room-code-display").textContent = joinCode;
+  const codeDisplay = document.getElementById("room-code-display");
+  if (!codeDisplay) return;
+  codeDisplay.textContent = joinCode;
+
+  let copyBtn = document.getElementById("btn-copy-code");
+  if (!copyBtn) {
+    copyBtn = document.createElement("button");
+    copyBtn.id = "btn-copy-code";
+    copyBtn.className =
+      "ml-2 text-gold/60 hover:text-gold transition-colors inline-flex items-center justify-center cursor-pointer bg-transparent border-none p-1 rounded hover:bg-white/5";
+    copyBtn.title = "Copiar Código da Sala";
+    copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(joinCode).then(() => {
+        const oldHtml = copyBtn.innerHTML;
+        copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+        setTimeout(() => {
+          copyBtn.innerHTML = oldHtml;
+        }, 2000);
+      });
+    });
+
+    if (codeDisplay.nextSibling) {
+      codeDisplay.parentNode.insertBefore(copyBtn, codeDisplay.nextSibling);
+    } else {
+      codeDisplay.parentNode.appendChild(copyBtn);
+    }
+  }
 }
 
 function getMySeatNumber() {
@@ -354,7 +382,7 @@ function renderActionPanel() {
       waitingMsg.textContent = "Aguardando o Host cobrar o Ante.";
     } else if (handState === HAND_STATE.ROUND_COMPLETE) {
       waitingMsg.textContent =
-        "Apostas encerradas — aguardando o Host distribuir o pote.";
+        "Apostas encerradas — aguardando o Host decidir o avanço da mesa.";
     } else {
       const turnPlayer = getCurrentTurnPlayer();
       waitingMsg.textContent =
@@ -504,6 +532,10 @@ function renderGivePotPanel() {
     return;
   }
 
+  const checkedBoxes = Array.from(
+    container.querySelectorAll(".pot-winner-checkbox:checked"),
+  ).map((cb) => cb.dataset.potIndex + "-" + cb.value);
+
   const contributions = playersCache.map((p) => ({
     id: p.id,
     bet: p.current_bet,
@@ -518,6 +550,51 @@ function renderGivePotPanel() {
       '<p class="text-cream/40 text-xs font-body">Nenhuma aposta na mesa ainda — nada pra entregar.</p>';
     return;
   }
+
+  // --- BOTÃO DE PRÓXIMA RODADA (FLOP/TURN/RIVER) ---
+  const nextRoundBtn = document.createElement("button");
+  nextRoundBtn.id = "btn-next-round";
+  nextRoundBtn.type = "button";
+  nextRoundBtn.className =
+    "w-full bg-[#163829] text-cream font-body font-semibold py-3 rounded-lg text-sm mb-4 border border-[#C9A227]/30 hover:bg-[#0F291E] transition-colors shadow-lg";
+  nextRoundBtn.textContent = "Avançar para Próxima Rodada (Flop/Turn/River)";
+  nextRoundBtn.addEventListener("click", () => {
+    runGuardedAction(nextRoundBtn, async () => {
+      nextRoundBtn.textContent = "Preparando rodada...";
+
+      const activePlayers = playersCache.filter((p) => !p.left_room);
+      await Promise.all(
+        activePlayers.map((p) =>
+          supabaseClient
+            .from("players")
+            .update({ current_bet: 0, has_acted_this_round: false })
+            .eq("id", p.id),
+        ),
+      );
+
+      const projected = buildProjectedPlayers({ current_bet: 0 });
+      const activeSeats = getActiveSeats(projected);
+      let nextSeat = null;
+      if (activeSeats.length > 0) {
+        const sorted = [...activeSeats].sort((a, b) => a - b);
+        nextSeat = sorted.find((s) => s > dealerSeat) || sorted[0];
+      }
+
+      await supabaseClient
+        .from("rooms")
+        .update({
+          hand_state: HAND_STATE.BETTING,
+          current_turn_seat: nextSeat,
+        })
+        .eq("id", roomCode);
+    });
+  });
+  container.appendChild(nextRoundBtn);
+
+  const divider = document.createElement("div");
+  divider.className = "w-full h-px bg-cream/10 my-2 mb-4";
+  container.appendChild(divider);
+  // ------------------------------------------------
 
   if (result.autoAwards.length > 0) {
     const info = document.createElement("p");
@@ -553,7 +630,7 @@ function renderGivePotPanel() {
           " — " +
           formatMoney(pot.amount) +
           " (marque mais de 1 em caso de empate)"
-        : "Vencedor da rodada — pote de " +
+        : "Encerrar a Mão: Pote de " +
           formatMoney(pot.amount) +
           " (marque mais de 1 em caso de empate)";
     wrap.appendChild(label);
@@ -561,12 +638,18 @@ function renderGivePotPanel() {
     eligiblePlayers.forEach((p) => {
       const optionLabel = document.createElement("label");
       optionLabel.className =
-        "flex items-center gap-2 py-1.5 px-1 text-cream font-body text-sm";
+        "flex items-center gap-2 py-1.5 px-1 text-cream font-body text-sm cursor-pointer";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.className = "pot-winner-checkbox";
+      checkbox.className = "pot-winner-checkbox cursor-pointer";
       checkbox.value = p.id;
+      checkbox.dataset.potIndex = index;
       checkbox.style.accentColor = "#C9A227";
+
+      if (checkedBoxes.includes(index + "-" + p.id)) {
+        checkbox.checked = true;
+      }
+
       const nameSpan = document.createElement("span");
       nameSpan.textContent = p.name + (p.id === myPlayerId ? " (você)" : "");
       optionLabel.appendChild(checkbox);
@@ -583,9 +666,9 @@ function renderGivePotPanel() {
     "w-full bg-gold text-ink font-body font-semibold py-2.5 rounded-lg text-sm mt-1";
   confirmBtn.textContent =
     result.pots.length > 1
-      ? "Entregar todos os potes"
+      ? "Entregar todos os potes e finalizar mão"
       : result.pots.length === 1
-        ? "Entregar pote"
+        ? "Entregar pote e finalizar mão"
         : "Confirmar devolução";
   confirmBtn.addEventListener("click", handleGivePotClick);
   container.appendChild(confirmBtn);
@@ -647,7 +730,7 @@ function getTurnNotAllowedReason() {
   if (handState === HAND_STATE.WAITING_FOR_ANTE)
     return 'Aguardando o Host clicar em "Cobrar Antes".';
   if (handState === HAND_STATE.ROUND_COMPLETE)
-    return "A rodada de apostas encerrou. Aguardando o Host entregar o pote.";
+    return "A rodada de apostas encerrou. Aguardando o Host decidir os potes ou avançar o jogo.";
   const turnPlayer = getCurrentTurnPlayer();
   if (turnPlayer) return "Aguarde: agora é a vez de " + turnPlayer.name + ".";
   return "Não é sua vez de agir neste momento.";
@@ -774,6 +857,7 @@ document.getElementById("btn-action-call").addEventListener("click", () => {
   });
 });
 
+// CORREÇÃO DO BOTÃO ALL-IN (Adicionado tratamento de erros no banco)
 document.getElementById("btn-action-allin").addEventListener("click", () => {
   const button = document.getElementById("btn-action-allin");
   if (!isMyTurn()) {
@@ -792,10 +876,17 @@ document.getElementById("btn-action-allin").addEventListener("click", () => {
     const newChips = me.chips - amount;
     const newBet = me.current_bet + amount;
 
-    await supabaseClient
+    const { error: playerError } = await supabaseClient
       .from("players")
       .update({ chips: newChips, current_bet: newBet, is_all_in: true })
       .eq("id", myPlayerId);
+    if (playerError) {
+      alert(
+        "Erro ao executar All-In no banco de dados: " + playerError.message,
+      );
+      return;
+    }
+
     const { data: roomRow } = await supabaseClient
       .from("rooms")
       .select("pot")
@@ -1177,6 +1268,7 @@ document.getElementById("btn-trocar-codigo").addEventListener("click", () => {
   });
 });
 
+// REMOVIDO BLOQUEIO DE ENCERRAMENTO DA PARTIDA
 document
   .getElementById("btn-encerrar-partida")
   .addEventListener("click", () => {
@@ -1184,15 +1276,10 @@ document
     runGuardedAction(btn, async () => {
       if (!isHost) return;
 
-      if (handState !== HAND_STATE.NO_HAND || potTotal > 0) {
-        alert(
-          "Não é possível encerrar a partida enquanto há uma mão em andamento ou fichas no pote.\n\nPor favor, jogue a mão até o fim ou distribua o pote antes de tentar encerrar.",
-        );
-        return;
-      }
-
       if (
-        !confirm("Tem certeza que deseja encerrar a partida definitivamente?")
+        !confirm(
+          "Tem certeza que deseja encerrar a partida definitivamente?\n\nO placar e os saldos actuais serão fechados como resultado final.",
+        )
       )
         return;
 
@@ -1702,7 +1789,6 @@ async function refreshRoomInfo() {
   checkGameFinishedStatus();
 }
 
-// FASE 8: Tela de Resultados com Preservação de DOM (Fix Polling)
 function checkGameFinishedStatus() {
   let overlay = document.getElementById("final-results-overlay");
 
@@ -1721,7 +1807,6 @@ function checkGameFinishedStatus() {
   overlay.style.cssText =
     "position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background-color: #0F291E !important; z-index: 999999 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: flex-start !important; padding: 24px !important; overflow-y: auto !important; font-family: ui-sans-serif, system-ui, sans-serif !important;";
 
-  // TRAVA MÁGICA: Se o painel já existe, mostramos e não destruímos nada para não apagar o que o utilizador digitou
   if (document.getElementById("reconfig-panel-container")) {
     overlay.style.display = "flex";
     return;
@@ -1753,7 +1838,6 @@ function checkGameFinishedStatus() {
     overlay.appendChild(list);
   }
 
-  // Contentor fixo para não ser apagado no próximo ciclo
   const panelContainer = document.createElement("div");
   panelContainer.id = "reconfig-panel-container";
   panelContainer.style.cssText =
@@ -1765,7 +1849,6 @@ function checkGameFinishedStatus() {
     configPanel.style.cssText =
       "background-color: #163829 !important; padding: 20px !important; border-radius: 0.75rem !important; width: 100% !important; border: 1px solid rgba(201, 162, 39, 0.2) !important; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important; box-sizing: border-box !important;";
 
-    // NOTA: O input "reconfig-preserve-chips" NÃO tem a tag "checked" aqui para iniciar desactivado
     configPanel.innerHTML = `
       <h3 style="color: #F1EBE1 !important; font-size: 1.125rem !important; margin-bottom: 16px !important; text-align: center !important; font-weight: 600 !important;">Configurar Nova Partida</h3>
       
