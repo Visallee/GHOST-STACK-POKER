@@ -1,5 +1,5 @@
 // ===========================================================
-// GhostStackPoker — js/partida.js (Fase 8 + Integridade)
+// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Visual Fixo)
 // ===========================================================
 
 import { supabaseClient } from "./supabase.js";
@@ -1185,7 +1185,6 @@ document
     runGuardedAction(btn, async () => {
       if (!isHost) return;
 
-      // Regra 5: Bloqueio de fuga. Protege contra perda de fichas na ausência de ledger.
       if (handState !== HAND_STATE.NO_HAND || potTotal > 0) {
         alert(
           "Não é possível encerrar a partida enquanto há uma mão em andamento ou fichas no pote.\n\nPor favor, jogue a mão até o fim ou distribua o pote antes de tentar encerrar.",
@@ -1702,72 +1701,80 @@ async function refreshRoomInfo() {
   checkGameFinishedStatus();
 }
 
-// FASE 8: Tela de Resultados Dinâmica e Reconfiguração Segura
+// FASE 8: Tela de Resultados Dinâmica e Reconfiguração (Correção Visual JIT Tailwind)
 function checkGameFinishedStatus() {
   let overlay = document.getElementById("final-results-overlay");
 
   if (gameStatus !== "finished") {
-    if (overlay) overlay.classList.add("hidden");
+    if (overlay) overlay.style.display = "none";
     return;
   }
 
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "final-results-overlay";
-    overlay.className =
-      "fixed inset-0 bg-forest z-50 flex flex-col items-center justify-start p-6 overflow-y-auto";
+    // Estilo blindado com cores hexadecimais para garantir o bloqueio da tela de fundo
+    overlay.style.cssText =
+      "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #0F291E; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 24px; overflow-y: auto; font-family: ui-sans-serif, system-ui, sans-serif;";
     document.body.appendChild(overlay);
   }
 
-  overlay.classList.remove("hidden");
+  overlay.style.display = "flex";
   overlay.innerHTML = "";
 
   const title = document.createElement("h2");
-  title.className = "text-gold font-display text-3xl mb-6 mt-4 text-center";
+  title.style.cssText =
+    "color: #C9A227; font-size: 1.875rem; margin-bottom: 24px; margin-top: 16px; text-align: center; font-family: ui-serif, Georgia, serif;";
   title.textContent = "Partida Encerrada";
   overlay.appendChild(title);
 
   if (finalResultsCache && finalResultsCache.length > 0) {
     const list = document.createElement("div");
-    list.className = "w-full max-w-md bg-forest-light/50 rounded-xl p-4 mb-6";
+    list.style.cssText =
+      "width: 100%; max-width: 28rem; background-color: #163829; border-radius: 0.75rem; padding: 16px; margin-bottom: 24px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);";
     finalResultsCache
       .sort((a, b) => a.rank - b.rank)
       .forEach((r) => {
         const item = document.createElement("div");
-        item.className =
-          "flex justify-between items-center py-2 border-b border-cream/10 last:border-0 text-cream font-body";
-        item.innerHTML = `<span>#${r.rank} ${escapeHtml(r.name)}</span><span class="text-gold font-bold">${formatMoney(r.chips)}</span>`;
+        item.style.cssText =
+          "display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(241, 235, 225, 0.1); color: #F1EBE1;";
+        item.innerHTML = `<span>#${r.rank} ${escapeHtml(r.name)}</span><span style="color: #C9A227; font-weight: bold;">${formatMoney(r.chips)}</span>`;
         list.appendChild(item);
       });
+    if (list.lastChild) list.lastChild.style.borderBottom = "none";
     overlay.appendChild(list);
   }
 
   if (isHost) {
     const configPanel = document.createElement("div");
-    configPanel.className =
-      "bg-forest-light p-4 rounded-xl w-full max-w-md mt-2 border border-gold/20";
+    configPanel.style.cssText =
+      "background-color: #163829; padding: 20px; border-radius: 0.75rem; width: 100%; max-width: 28rem; border: 1px solid rgba(201, 162, 39, 0.2); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); box-sizing: border-box;";
     configPanel.innerHTML = `
-      <h3 class="text-cream font-body text-lg mb-4 text-center">Configurar Nova Partida</h3>
-      <div class="mb-4 flex items-center gap-2 bg-forest/50 p-3 rounded">
-        <input type="checkbox" id="reconfig-preserve-chips" checked class="w-4 h-4 accent-gold cursor-pointer">
-        <label for="reconfig-preserve-chips" class="text-cream text-sm font-body cursor-pointer select-none">Preservar saldos finais da partida anterior</label>
+      <h3 style="color: #F1EBE1; font-size: 1.125rem; margin-bottom: 16px; text-align: center; font-weight: 600;">Configurar Nova Partida</h3>
+      
+      <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px; background-color: #0F291E; padding: 12px; border-radius: 0.25rem;">
+        <input type="checkbox" id="reconfig-preserve-chips" checked style="width: 1.25rem; height: 1.25rem; accent-color: #C9A227; cursor: pointer; flex-shrink: 0;">
+        <label for="reconfig-preserve-chips" style="color: #F1EBE1; font-size: 0.875rem; cursor: pointer; user-select: none;">Preservar saldos finais da partida anterior</label>
       </div>
-      <div class="mb-4">
-        <label class="block text-cream/60 text-xs font-body mb-1">Fichas Iniciais (para os zerados ou caso desmarque a opção acima)</label>
-        <input type="number" id="reconfig-starting-chips" value="${startingChips}" class="w-full bg-forest text-cream font-body rounded p-2 border border-cream/10 outline-none focus:border-gold">
+      
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; color: rgba(241, 235, 225, 0.6); font-size: 0.75rem; margin-bottom: 4px;">Fichas Iniciais (para os zerados ou caso desmarque a opção acima)</label>
+        <input type="number" id="reconfig-starting-chips" value="${startingChips}" style="width: 100%; background-color: #0F291E; color: #F1EBE1; border-radius: 0.25rem; padding: 12px; border: 1px solid rgba(241, 235, 225, 0.1); outline: none; box-sizing: border-box;">
       </div>
-      <div class="mb-6">
-        <label class="block text-cream/60 text-xs font-body mb-1">Novo Ante</label>
-        <input type="number" id="reconfig-ante" value="${anteAmount}" class="w-full bg-forest text-cream font-body rounded p-2 border border-cream/10 outline-none focus:border-gold">
+      
+      <div style="margin-bottom: 24px;">
+        <label style="display: block; color: rgba(241, 235, 225, 0.6); font-size: 0.75rem; margin-bottom: 4px;">Novo Ante</label>
+        <input type="number" id="reconfig-ante" value="${anteAmount}" style="width: 100%; background-color: #0F291E; color: #F1EBE1; border-radius: 0.25rem; padding: 12px; border: 1px solid rgba(241, 235, 225, 0.1); outline: none; box-sizing: border-box;">
       </div>
-      <button id="btn-reconfig-start" class="w-full bg-gold text-ink font-body font-semibold py-3 rounded-lg hover:bg-gold/90 transition-colors shadow-lg">Iniciar Nova Partida na mesma mesa</button>
+      
+      <button id="btn-reconfig-start" style="width: 100%; background-color: #C9A227; color: #0A110E; font-weight: bold; padding: 12px; border-radius: 0.5rem; border: none; cursor: pointer; font-size: 1rem;">Iniciar Nova Partida na mesma mesa</button>
     `;
     overlay.appendChild(configPanel);
 
     document
       .getElementById("btn-reconfig-start")
       .addEventListener("click", () => {
-        if (!isHost) return; // TRAVA DE SEGURANÇA DO CLIENTE
+        if (!isHost) return; // TRAVA DE SEGURANÇA CLIENTE (Patch A)
 
         const btn = document.getElementById("btn-reconfig-start");
         runGuardedAction(btn, async () => {
@@ -1788,7 +1795,7 @@ function checkGameFinishedStatus() {
             activePlayers.map((p) => {
               let finalChips;
               if (preserveChips) {
-                finalChips = p.chips > 0 ? p.chips : newStartingChips;
+                finalChips = p.chips > 0 ? p.chips : newStartingChips; // Patch A: Reseta os zerados, mantém os vivos
               } else {
                 finalChips = newStartingChips;
               }
@@ -1831,16 +1838,16 @@ function checkGameFinishedStatus() {
       });
   } else {
     const waitMsg = document.createElement("p");
-    waitMsg.className =
-      "text-cream/60 font-body text-center mt-8 px-4 animate-pulse";
+    waitMsg.style.cssText =
+      "color: rgba(241, 235, 225, 0.6); text-align: center; margin-top: 32px; padding: 0 16px;";
     waitMsg.textContent =
       "Aguardando o Host reconfigurar a sala para uma nova partida...";
     overlay.appendChild(waitMsg);
   }
 
   const leaveBtn = document.createElement("button");
-  leaveBtn.className =
-    "mt-8 mb-4 text-cream/40 underline font-body text-sm hover:text-cream/60";
+  leaveBtn.style.cssText =
+    "margin-top: 32px; margin-bottom: 16px; color: rgba(241, 235, 225, 0.4); text-decoration: underline; background: none; border: none; cursor: pointer;";
   leaveBtn.textContent = "Sair da sala";
   leaveBtn.addEventListener("click", async () => {
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
