@@ -1,5 +1,5 @@
 // ===========================================================
-// GhostStackPoker — js/partida.js
+// GhostStackPoker — js/partida.js (Fase 8 + Integridade)
 // ===========================================================
 
 import { supabaseClient } from "./supabase.js";
@@ -70,7 +70,6 @@ function reportCriticalErrorOnce(key, message) {
 }
 
 const session = loadSession();
-
 if (!session) {
   window.location.href = "home.html";
   throw new Error("Sem sessão ativa — redirecionando para o lobby.");
@@ -124,22 +123,17 @@ let roundLimit = null;
 let currentRound = 0;
 let gameStatus = "in_progress";
 let startingChips = 1000;
+let anteAmount = 0;
+let finalResultsCache = null;
 
 async function removePlayerFromRoom(playerId) {
-  const player = playersCache.find(function (p) {
-    return p.id === playerId;
-  });
+  const player = playersCache.find((p) => p.id === playerId);
   if (!player) return;
 
   if (player.current_bet > 0) {
     await supabaseClient
       .from("players")
-      .update({
-        left_room: true,
-        folded: true,
-        chips: 0,
-        is_eliminated: true,
-      })
+      .update({ left_room: true, folded: true, chips: 0, is_eliminated: true })
       .eq("id", playerId);
   } else {
     await supabaseClient.from("players").delete().eq("id", playerId);
@@ -148,22 +142,18 @@ async function removePlayerFromRoom(playerId) {
 
 function renderChipsUI() {
   const balance = getMyStackTotal();
-
-  Object.keys(CHIP_VALUES).forEach(function (color) {
+  Object.keys(CHIP_VALUES).forEach((color) => {
     const chipButton = document.querySelector(
       `.chip[data-chip-color="${color}"]`,
     );
-    if (chipButton) {
+    if (chipButton)
       chipButton.disabled = currentBet + CHIP_VALUES[color] > balance;
-    }
   });
 
   const currentBetEl = document.getElementById("current-bet");
   if (currentBetEl) currentBetEl.textContent = formatMoney(currentBet);
 
-  const me = playersCache.find(function (p) {
-    return p.id === myPlayerId;
-  });
+  const me = playersCache.find((p) => p.id === myPlayerId);
   const alreadyBet = me ? me.current_bet : 0;
   const maxBet = getMaxTableBet();
   const toCall = getAmountToCall(alreadyBet, maxBet);
@@ -208,9 +198,7 @@ function renderRoomCodeUI() {
 }
 
 function getMySeatNumber() {
-  const me = playersCache.find(function (p) {
-    return p.id === myPlayerId;
-  });
+  const me = playersCache.find((p) => p.id === myPlayerId);
   return me ? me.seat_number : null;
 }
 
@@ -225,18 +213,13 @@ function isMyTurn() {
 }
 
 function getCurrentTurnPlayer() {
-  return (
-    playersCache.find(function (p) {
-      return p.seat_number === currentTurnSeat;
-    }) || null
-  );
+  return playersCache.find((p) => p.seat_number === currentTurnSeat) || null;
 }
 
 function buildProjectedPlayers(overrides) {
-  return playersCache.map(function (p) {
-    if (p.id !== myPlayerId) return p;
-    return Object.assign({}, p, overrides);
-  });
+  return playersCache.map((p) =>
+    p.id !== myPlayerId ? p : Object.assign({}, p, overrides),
+  );
 }
 
 async function advanceTurnAfterMyAction(overrides) {
@@ -245,9 +228,7 @@ async function advanceTurnAfterMyAction(overrides) {
 
   const previousMaxBet = getMaxTableBet();
   const projected = buildProjectedPlayers(overrides);
-  const myProjected = projected.find(function (p) {
-    return p.id === myPlayerId;
-  });
+  const myProjected = projected.find((p) => p.id === myPlayerId);
   const myNewBet = myProjected ? myProjected.current_bet : 0;
 
   const updatedPlayers = applyActionToRound(
@@ -262,12 +243,12 @@ async function advanceTurnAfterMyAction(overrides) {
   const closed = isBettingRoundClosed(updatedPlayers, newMaxBet);
 
   await Promise.all(
-    updatedPlayers.map(function (p) {
-      return supabaseClient
+    updatedPlayers.map((p) =>
+      supabaseClient
         .from("players")
         .update({ has_acted_this_round: p.has_acted_this_round })
-        .eq("id", p.id);
-    }),
+        .eq("id", p.id),
+    ),
   );
 
   if (closed) {
@@ -288,11 +269,9 @@ async function advanceTurnAfterMyAction(overrides) {
       newMaxBet,
       mySeat,
     );
-
     currentTurnSeat = nextSeat;
     handState =
       nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
-
     await supabaseClient
       .from("rooms")
       .update({ current_turn_seat: nextSeat, hand_state: handState })
@@ -309,7 +288,6 @@ function renderHostUI() {
     .getElementById("btn-open-room-settings")
     .classList.toggle("hidden", !isHost);
   document.getElementById("panel-give-pot").classList.toggle("hidden", !isHost);
-
   document
     .getElementById("btn-start-hand")
     .classList.toggle("hidden", !(isHost && handState === HAND_STATE.NO_HAND));
@@ -326,9 +304,7 @@ function getMaxTableBet() {
 }
 
 function getMyStackTotal() {
-  const me = playersCache.find(function (p) {
-    return p.id === myPlayerId;
-  });
+  const me = playersCache.find((p) => p.id === myPlayerId);
   return me ? me.chips : 0;
 }
 
@@ -336,9 +312,7 @@ function renderActionPanel() {
   if (!document.getElementById("panel-eliminated").classList.contains("hidden"))
     return;
 
-  const me = playersCache.find(function (p) {
-    return p.id === myPlayerId;
-  });
+  const me = playersCache.find((p) => p.id === myPlayerId);
   const myBet = me ? me.current_bet : 0;
   const maxBet = getMaxTableBet();
   const myStack = getMyStackTotal();
@@ -388,7 +362,6 @@ function renderActionPanel() {
         (turnPlayer ? turnPlayer.name : "outro jogador") +
         " jogar...";
     }
-
     const raisePanel = document.getElementById("panel-raise");
     if (!raisePanel.classList.contains("hidden")) {
       currentBet = 0;
@@ -408,7 +381,7 @@ function renderLeaderboard(players) {
   const listEl = document.getElementById("players-list");
   listEl.innerHTML = "";
 
-  players.forEach(function (p) {
+  players.forEach((p) => {
     const isMe = p.id === myPlayerId;
     const isPlayersTurn =
       currentTurnSeat !== null && p.seat_number === currentTurnSeat;
@@ -423,7 +396,6 @@ function renderLeaderboard(players) {
 
     let statusText;
     let statusClass;
-
     if (p.left_room) {
       statusText = "abandonou a mão";
       statusClass = "text-burgundy opacity-50";
@@ -455,19 +427,12 @@ function renderLeaderboard(players) {
 
     const showKick = isHost && allowKick && !isMe && !p.left_room;
     const kickButtonHtml = showKick
-      ? '<button class="btn-kick-player" type="button" aria-label="Expulsar ' +
-        escapeHtml(p.name) +
-        '" title="Expulsar jogador" data-player-id="' +
+      ? '<button class="btn-kick-player" type="button" aria-label="Expulsar" data-player-id="' +
         p.id +
         '" data-player-name="' +
         escapeHtml(p.name) +
         '">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-        '<path d="M16 17l5-5-5-5"/>' +
-        '<path d="M21 12H9"/>' +
-        '<path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/>' +
-        "</svg>" +
-        "</button>"
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/><path d="M13 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg></button>'
       : "";
 
     const showApproveRebuy =
@@ -488,8 +453,7 @@ function renderLeaderboard(players) {
         : "";
 
     card.innerHTML =
-      '<div class="flex items-center gap-2">' +
-      '<span class="w-2 h-2 rounded-full ' +
+      '<div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full ' +
       (isMe ? "bg-gold" : p.is_host ? "bg-burgundy" : "bg-cream/20") +
       '"></span>' +
       '<span class="text-cream font-body font-medium text-sm' +
@@ -502,12 +466,9 @@ function renderLeaderboard(players) {
       dealerBadgeHtml +
       turnBadgeHtml +
       "</div>" +
-      '<div class="flex items-center">' +
-      '<div class="text-right">' +
-      '<p class="text-cream font-display text-base leading-none">' +
+      '<div class="flex items-center"><div class="text-right"><p class="text-cream font-display text-base leading-none">' +
       formatMoney(p.chips) +
-      "</p>" +
-      '<p class="' +
+      '</p><p class="' +
       statusClass +
       ' text-[11px] font-body">' +
       statusText +
@@ -517,21 +478,23 @@ function renderLeaderboard(players) {
       approveRebuyHtml +
       kickButtonHtml +
       "</div>";
-
     listEl.appendChild(card);
   });
 
-  document.querySelectorAll(".btn-approve-rebuy").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      handleApproveRebuy(btn.dataset.playerId, btn);
-    });
-  });
-
-  document.querySelectorAll(".btn-kick-player").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      handleKickPlayer(btn.dataset.playerId, btn.dataset.playerName, btn);
-    });
-  });
+  document
+    .querySelectorAll(".btn-approve-rebuy")
+    .forEach((btn) =>
+      btn.addEventListener("click", () =>
+        handleApproveRebuy(btn.dataset.playerId, btn),
+      ),
+    );
+  document
+    .querySelectorAll(".btn-kick-player")
+    .forEach((btn) =>
+      btn.addEventListener("click", () =>
+        handleKickPlayer(btn.dataset.playerId, btn.dataset.playerName, btn),
+      ),
+    );
 }
 
 function renderGivePotPanel() {
@@ -541,9 +504,11 @@ function renderGivePotPanel() {
     return;
   }
 
-  const contributions = playersCache.map(function (p) {
-    return { id: p.id, bet: p.current_bet, folded: p.folded };
-  });
+  const contributions = playersCache.map((p) => ({
+    id: p.id,
+    bet: p.current_bet,
+    folded: p.folded,
+  }));
   const result = computeSidePots(contributions);
 
   container.innerHTML = "";
@@ -558,10 +523,8 @@ function renderGivePotPanel() {
     const info = document.createElement("p");
     info.className = "text-cream/40 text-[11px] font-body mb-3";
     const names = result.autoAwards
-      .map(function (a) {
-        const p = playersCache.find(function (pp) {
-          return pp.id === a.playerId;
-        });
+      .map((a) => {
+        const p = playersCache.find((pp) => pp.id === a.playerId);
         return (
           (p ? p.name : "?") + " (+" + formatMoney(a.amount) + " devolvido)"
         );
@@ -571,11 +534,10 @@ function renderGivePotPanel() {
     container.appendChild(info);
   }
 
-  result.pots.forEach(function (pot, index) {
-    const eligiblePlayers = playersCache.filter(function (p) {
-      return pot.eligible_player_ids.indexOf(p.id) !== -1;
-    });
-
+  result.pots.forEach((pot, index) => {
+    const eligiblePlayers = playersCache.filter(
+      (p) => pot.eligible_player_ids.indexOf(p.id) !== -1,
+    );
     const wrap = document.createElement("div");
     wrap.className = "mb-3 pot-winner-group";
     wrap.dataset.potAmount = pot.amount;
@@ -594,28 +556,23 @@ function renderGivePotPanel() {
         : "Vencedor da rodada — pote de " +
           formatMoney(pot.amount) +
           " (marque mais de 1 em caso de empate)";
-
     wrap.appendChild(label);
 
-    eligiblePlayers.forEach(function (p) {
+    eligiblePlayers.forEach((p) => {
       const optionLabel = document.createElement("label");
       optionLabel.className =
         "flex items-center gap-2 py-1.5 px-1 text-cream font-body text-sm";
-
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.className = "pot-winner-checkbox";
       checkbox.value = p.id;
       checkbox.style.accentColor = "#C9A227";
-
       const nameSpan = document.createElement("span");
       nameSpan.textContent = p.name + (p.id === myPlayerId ? " (você)" : "");
-
       optionLabel.appendChild(checkbox);
       optionLabel.appendChild(nameSpan);
       wrap.appendChild(optionLabel);
     });
-
     container.appendChild(wrap);
   });
 
@@ -651,7 +608,6 @@ function showEliminatedPanel(needsApproval) {
   document.getElementById("panel-raise").classList.remove("flex");
   document.getElementById("panel-eliminated").classList.remove("hidden");
   document.getElementById("panel-eliminated").classList.add("flex");
-
   document
     .getElementById("btn-request-rebuy")
     .classList.toggle("hidden", needsApproval);
@@ -667,435 +623,375 @@ function showRaisePanel() {
   document.getElementById("panel-actions").classList.remove("flex");
   document.getElementById("panel-raise").classList.remove("hidden");
   document.getElementById("panel-raise").classList.add("flex");
-
   renderChipsUI();
 }
 
-document.querySelectorAll(".chip").forEach(function (chipButton) {
-  chipButton.addEventListener("click", function () {
+document.querySelectorAll(".chip").forEach((chipButton) => {
+  chipButton.addEventListener("click", () => {
     const color = chipButton.dataset.chipColor;
     const value = CHIP_VALUES[color];
-    const balance = getMyStackTotal();
-
-    if (currentBet + value > balance) return;
-
+    if (currentBet + value > getMyStackTotal()) return;
     currentBet += value;
     renderChipsUI();
   });
 });
 
-document.getElementById("btn-clear-bet").addEventListener("click", function () {
+document.getElementById("btn-clear-bet").addEventListener("click", () => {
   currentBet = 0;
   renderChipsUI();
 });
 
 function getTurnNotAllowedReason() {
-  if (handState === HAND_STATE.NO_HAND) {
-    return 'A mão ainda não começou. O Host precisa clicar em "Iniciar Mão" acima.';
-  }
-  if (handState === HAND_STATE.WAITING_FOR_ANTE) {
-    return 'Aguardando o Host clicar em "Cobrar Antes" para iniciar as apostas.';
-  }
-  if (handState === HAND_STATE.ROUND_COMPLETE) {
+  if (handState === HAND_STATE.NO_HAND)
+    return 'A mão ainda não começou. O Host precisa clicar em "Iniciar Mão".';
+  if (handState === HAND_STATE.WAITING_FOR_ANTE)
+    return 'Aguardando o Host clicar em "Cobrar Antes".';
+  if (handState === HAND_STATE.ROUND_COMPLETE)
     return "A rodada de apostas encerrou. Aguardando o Host entregar o pote.";
-  }
   const turnPlayer = getCurrentTurnPlayer();
-  if (turnPlayer) {
-    return "Aguarde: agora é a vez de " + turnPlayer.name + " agir.";
-  }
+  if (turnPlayer) return "Aguarde: agora é a vez de " + turnPlayer.name + ".";
   return "Não é sua vez de agir neste momento.";
 }
 
-document
-  .getElementById("btn-action-raise")
-  .addEventListener("click", function () {
-    if (!isMyTurn()) {
-      alert(getTurnNotAllowedReason());
-      renderActionPanel();
+document.getElementById("btn-action-raise").addEventListener("click", () => {
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
+  if (document.getElementById("btn-action-raise").disabled) return;
+  showRaisePanel();
+});
+
+document.getElementById("btn-raise-back").addEventListener("click", () => {
+  currentBet = 0;
+  renderChipsUI();
+  showActionsPanel();
+});
+
+document.getElementById("btn-confirm-bet").addEventListener("click", () => {
+  const button = document.getElementById("btn-confirm-bet");
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
+  runGuardedAction(button, async () => {
+    if (!isMyTurn() || currentBet <= 0) return;
+    const betAmount = currentBet;
+    const me = playersCache.find((p) => p.id === myPlayerId);
+    if (!me) return;
+
+    const validation = validateBetAmount(
+      betAmount,
+      getMyStackTotal(),
+      me.current_bet,
+      getMaxTableBet(),
+    );
+    if (!validation.valid) {
+      alert(validation.reason);
+      renderChipsUI();
       return;
     }
-    if (document.getElementById("btn-action-raise").disabled) return;
-    showRaisePanel();
-  });
 
-document
-  .getElementById("btn-raise-back")
-  .addEventListener("click", function () {
+    const newChips = me.chips - betAmount;
+    const newBet = me.current_bet + betAmount;
+
+    const { error: playerError } = await supabaseClient
+      .from("players")
+      .update({ chips: newChips, current_bet: newBet })
+      .eq("id", myPlayerId);
+    if (playerError) {
+      alert("Não foi possível confirmar o aumento: " + playerError.message);
+      return;
+    }
+
+    const { data: roomRow } = await supabaseClient
+      .from("rooms")
+      .select("pot")
+      .eq("id", roomCode)
+      .single();
+    await supabaseClient
+      .from("rooms")
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
+      .eq("id", roomCode);
+
     currentBet = 0;
     renderChipsUI();
     showActionsPanel();
+    await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
   });
+});
 
-document
-  .getElementById("btn-confirm-bet")
-  .addEventListener("click", function () {
-    const button = document.getElementById("btn-confirm-bet");
-    if (!isMyTurn()) {
-      alert(getTurnNotAllowedReason());
-      renderActionPanel();
+document.getElementById("btn-action-call").addEventListener("click", () => {
+  const button = document.getElementById("btn-action-call");
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
+  runGuardedAction(button, async () => {
+    if (!isMyTurn() || button.disabled) return;
+    if (currentCallAmount <= 0) {
+      await advanceTurnAfterMyAction({});
       return;
     }
-    runGuardedAction(button, async function () {
-      if (!isMyTurn()) return;
-      if (currentBet <= 0) return;
 
-      const betAmount = currentBet;
-      const me = playersCache.find(function (p) {
-        return p.id === myPlayerId;
-      });
-      if (!me) return;
+    const amount = currentCallAmount;
+    const me = playersCache.find((p) => p.id === myPlayerId);
+    if (!me) return;
 
-      const maxBet = getMaxTableBet();
-      const validation = validateBetAmount(
-        betAmount,
-        getMyStackTotal(),
-        me.current_bet,
-        maxBet,
-      );
-      if (!validation.valid) {
-        alert(validation.reason);
-        renderChipsUI();
-        return;
-      }
-
-      const newChips = me.chips - betAmount;
-      const newBet = me.current_bet + betAmount;
-
-      const { error: playerError } = await supabaseClient
-        .from("players")
-        .update({ chips: newChips, current_bet: newBet })
-        .eq("id", myPlayerId);
-
-      if (playerError) {
-        alert("Não foi possível confirmar o aumento: " + playerError.message);
-        return;
-      }
-
-      const { data: roomRow } = await supabaseClient
-        .from("rooms")
-        .select("pot")
-        .eq("id", roomCode)
-        .single();
-
-      await supabaseClient
-        .from("rooms")
-        .update({ pot: (roomRow ? roomRow.pot : potTotal) + betAmount })
-        .eq("id", roomCode);
-
-      currentBet = 0;
-      renderChipsUI();
-      showActionsPanel();
-
-      await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
-    });
-  });
-
-document
-  .getElementById("btn-action-call")
-  .addEventListener("click", function () {
-    const button = document.getElementById("btn-action-call");
-    if (!isMyTurn()) {
-      alert(getTurnNotAllowedReason());
-      renderActionPanel();
+    const validation = validateBetAmount(
+      amount,
+      getMyStackTotal(),
+      me.current_bet,
+      getMaxTableBet(),
+    );
+    if (!validation.valid) {
+      alert(validation.reason);
       return;
     }
-    runGuardedAction(button, async function () {
-      if (!isMyTurn()) return;
-      if (button.disabled) return;
 
-      if (currentCallAmount <= 0) {
-        await advanceTurnAfterMyAction({});
-        return;
-      }
+    const newChips = me.chips - amount;
+    const newBet = me.current_bet + amount;
 
-      const amount = currentCallAmount;
-      const me = playersCache.find(function (p) {
-        return p.id === myPlayerId;
-      });
-      if (!me) return;
+    await supabaseClient
+      .from("players")
+      .update({ chips: newChips, current_bet: newBet })
+      .eq("id", myPlayerId);
+    const { data: roomRow } = await supabaseClient
+      .from("rooms")
+      .select("pot")
+      .eq("id", roomCode)
+      .single();
+    await supabaseClient
+      .from("rooms")
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+      .eq("id", roomCode);
 
-      const maxBet = getMaxTableBet();
-      const validation = validateBetAmount(
-        amount,
-        getMyStackTotal(),
-        me.current_bet,
-        maxBet,
-      );
-      if (!validation.valid) {
-        alert(validation.reason);
-        return;
-      }
+    renderActionPanel();
+    await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
+  });
+});
 
-      const newChips = me.chips - amount;
-      const newBet = me.current_bet + amount;
+document.getElementById("btn-action-allin").addEventListener("click", () => {
+  const button = document.getElementById("btn-action-allin");
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
+  runGuardedAction(button, async () => {
+    if (!isMyTurn() || button.disabled) return;
+    const me = playersCache.find((p) => p.id === myPlayerId);
+    if (!me) return;
 
-      await supabaseClient
-        .from("players")
-        .update({ chips: newChips, current_bet: newBet })
-        .eq("id", myPlayerId);
+    const amount = getMyStackTotal();
+    if (amount <= 0) return;
 
-      const { data: roomRow } = await supabaseClient
-        .from("rooms")
-        .select("pot")
-        .eq("id", roomCode)
-        .single();
+    const newChips = me.chips - amount;
+    const newBet = me.current_bet + amount;
 
-      await supabaseClient
-        .from("rooms")
-        .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
-        .eq("id", roomCode);
+    await supabaseClient
+      .from("players")
+      .update({ chips: newChips, current_bet: newBet, is_all_in: true })
+      .eq("id", myPlayerId);
+    const { data: roomRow } = await supabaseClient
+      .from("rooms")
+      .select("pot")
+      .eq("id", roomCode)
+      .single();
+    await supabaseClient
+      .from("rooms")
+      .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
+      .eq("id", roomCode);
 
-      renderActionPanel();
-
-      await advanceTurnAfterMyAction({ chips: newChips, current_bet: newBet });
+    renderActionPanel();
+    await advanceTurnAfterMyAction({
+      chips: newChips,
+      current_bet: newBet,
+      is_all_in: true,
     });
   });
-
-document
-  .getElementById("btn-action-allin")
-  .addEventListener("click", function () {
-    const button = document.getElementById("btn-action-allin");
-    if (!isMyTurn()) {
-      alert(getTurnNotAllowedReason());
-      renderActionPanel();
-      return;
-    }
-    runGuardedAction(button, async function () {
-      if (!isMyTurn()) return;
-      if (button.disabled) return;
-
-      const me = playersCache.find(function (p) {
-        return p.id === myPlayerId;
-      });
-      if (!me) return;
-
-      const amount = getMyStackTotal();
-      if (amount <= 0) return;
-
-      const newChips = me.chips - amount;
-      const newBet = me.current_bet + amount;
-
-      await supabaseClient
-        .from("players")
-        .update({ chips: newChips, current_bet: newBet, is_all_in: true })
-        .eq("id", myPlayerId);
-
-      const { data: roomRow } = await supabaseClient
-        .from("rooms")
-        .select("pot")
-        .eq("id", roomCode)
-        .single();
-
-      await supabaseClient
-        .from("rooms")
-        .update({ pot: (roomRow ? roomRow.pot : potTotal) + amount })
-        .eq("id", roomCode);
-
-      renderActionPanel();
-
-      await advanceTurnAfterMyAction({
-        chips: newChips,
-        current_bet: newBet,
-        is_all_in: true,
-      });
-    });
-  });
+});
 
 function getAssignmentsFromSidePots(result) {
   const assignments = [];
-  result.autoAwards.forEach(function (a) {
-    assignments.push({ winnerId: a.playerId, amount: a.amount });
-  });
-  result.pots.forEach(function (pot) {
+  result.autoAwards.forEach((a) =>
+    assignments.push({ winnerId: a.playerId, amount: a.amount }),
+  );
+  result.pots.forEach((pot) => {
     if (pot.eligible_player_ids.length > 0) {
       const splits = splitPotAmongWinners(pot.amount, pot.eligible_player_ids);
-      splits.forEach(function (s) {
-        assignments.push({ winnerId: s.playerId, amount: s.amount });
-      });
+      splits.forEach((s) =>
+        assignments.push({ winnerId: s.playerId, amount: s.amount }),
+      );
     }
   });
   return assignments;
 }
 
-document
-  .getElementById("btn-action-fold")
-  .addEventListener("click", function () {
-    const foldBtn = document.getElementById("btn-action-fold");
-    if (!isMyTurn()) {
-      alert(getTurnNotAllowedReason());
-      renderActionPanel();
-      return;
-    }
-    runGuardedAction(foldBtn, async function () {
-      if (!isMyTurn()) return;
+document.getElementById("btn-action-fold").addEventListener("click", () => {
+  const foldBtn = document.getElementById("btn-action-fold");
+  if (!isMyTurn()) {
+    alert(getTurnNotAllowedReason());
+    renderActionPanel();
+    return;
+  }
+  runGuardedAction(foldBtn, async () => {
+    if (!isMyTurn()) return;
 
-      const wasFolded = hasFolded;
-      hasFolded = !hasFolded;
+    const wasFolded = hasFolded;
+    hasFolded = !hasFolded;
+    foldBtn.querySelector("span").textContent = hasFolded
+      ? "Voltar pra rodada"
+      : "Desistir";
 
-      foldBtn.querySelector("span").textContent = hasFolded
-        ? "Voltar pra rodada"
-        : "Desistir";
+    await supabaseClient
+      .from("players")
+      .update({ folded: hasFolded })
+      .eq("id", myPlayerId);
 
-      await supabaseClient
-        .from("players")
-        .update({ folded: hasFolded })
-        .eq("id", myPlayerId);
+    if (hasFolded && !wasFolded) {
+      const projected = buildProjectedPlayers({ folded: true });
+      const activeSeatsNow = getActiveSeats(projected);
 
-      if (hasFolded && !wasFolded) {
-        const projected = buildProjectedPlayers({ folded: true });
-        const activeSeatsNow = getActiveSeats(projected);
-
-        if (activeSeatsNow.length === 1) {
-          const contributions = projected.map(function (p) {
-            return { id: p.id, bet: p.current_bet, folded: p.folded };
-          });
-          const result = computeSidePots(contributions);
-          const assignments = getAssignmentsFromSidePots(result);
-
-          if (assignments.length > 0) {
-            await resolveEndOfHand(assignments);
-            return;
-          }
+      if (activeSeatsNow.length === 1) {
+        const contributions = projected.map((p) => ({
+          id: p.id,
+          bet: p.current_bet,
+          folded: p.folded,
+        }));
+        const result = computeSidePots(contributions);
+        const assignments = getAssignmentsFromSidePots(result);
+        if (assignments.length > 0) {
+          await resolveEndOfHand(assignments);
+          return;
         }
-
-        await advanceTurnAfterMyAction({ folded: true });
       }
-    });
+      await advanceTurnAfterMyAction({ folded: true });
+    }
   });
+});
 
-document
-  .getElementById("btn-start-hand")
-  .addEventListener("click", function () {
-    const btn = document.getElementById("btn-start-hand");
-    runGuardedAction(btn, async function () {
-      if (!isHost) return;
+document.getElementById("btn-start-hand").addEventListener("click", () => {
+  const btn = document.getElementById("btn-start-hand");
+  runGuardedAction(btn, async () => {
+    if (!isHost) return;
+    const activeSeatsForNewHand = getActiveSeats(playersCache);
+    if (activeSeatsForNewHand.length === 0) return;
 
-      const activeSeatsForNewHand = getActiveSeats(playersCache);
-      if (activeSeatsForNewHand.length === 0) return;
+    const newDealerSeat = computeNextDealerSeat(
+      activeSeatsForNewHand,
+      dealerSeat,
+    );
+    btn.textContent = "Iniciando...";
 
-      const newDealerSeat = computeNextDealerSeat(
-        activeSeatsForNewHand,
-        dealerSeat,
-      );
+    await Promise.all(
+      playersCache.map((p) =>
+        supabaseClient
+          .from("players")
+          .update({ has_acted_this_round: false, is_all_in: false })
+          .eq("id", p.id),
+      ),
+    );
+    await supabaseClient
+      .from("rooms")
+      .update({
+        dealer_seat: newDealerSeat,
+        current_turn_seat: null,
+        hand_state: HAND_STATE.WAITING_FOR_ANTE,
+      })
+      .eq("id", roomCode);
 
-      btn.textContent = "Iniciando...";
-
-      await Promise.all(
-        playersCache.map(function (p) {
-          return supabaseClient
-            .from("players")
-            .update({ has_acted_this_round: false, is_all_in: false })
-            .eq("id", p.id);
-        }),
-      );
-
-      await supabaseClient
-        .from("rooms")
-        .update({
-          dealer_seat: newDealerSeat,
-          current_turn_seat: null,
-          hand_state: HAND_STATE.WAITING_FOR_ANTE,
-        })
-        .eq("id", roomCode);
-
-      dealerSeat = newDealerSeat;
-      currentTurnSeat = null;
-      handState = HAND_STATE.WAITING_FOR_ANTE;
-
-      btn.textContent = "Iniciar Mão";
-
-      renderHostUI();
-      renderLeaderboard(playersCache);
-      renderActionPanel();
-    });
+    dealerSeat = newDealerSeat;
+    currentTurnSeat = null;
+    handState = HAND_STATE.WAITING_FOR_ANTE;
+    btn.textContent = "Iniciar Mão";
+    renderHostUI();
+    renderLeaderboard(playersCache);
+    renderActionPanel();
   });
+});
 
-document
-  .getElementById("btn-force-ante")
-  .addEventListener("click", function () {
-    const btn = document.getElementById("btn-force-ante");
-    runGuardedAction(btn, async function () {
-      if (!isHost) return;
-      if (handState !== HAND_STATE.WAITING_FOR_ANTE) return;
+document.getElementById("btn-force-ante").addEventListener("click", () => {
+  const btn = document.getElementById("btn-force-ante");
+  runGuardedAction(btn, async () => {
+    if (!isHost || handState !== HAND_STATE.WAITING_FOR_ANTE) return;
 
-      const { data: roomRow } = await supabaseClient
-        .from("rooms")
-        .select("pot, ante_amount")
-        .eq("id", roomCode)
-        .single();
+    const { data: roomRow } = await supabaseClient
+      .from("rooms")
+      .select("pot, ante_amount")
+      .eq("id", roomCode)
+      .single();
+    if (!roomRow) return;
+    const ante = roomRow.ante_amount;
 
-      if (!roomRow) return;
-      const anteAmount = roomRow.ante_amount;
+    const activePlayers = playersCache.filter(
+      (p) => !p.folded && !p.is_eliminated && !p.left_room && !p.sitting_out,
+    );
 
-      const activePlayers = playersCache.filter(function (p) {
-        return !p.folded && !p.is_eliminated && !p.left_room && !p.sitting_out;
+    await Promise.all(
+      activePlayers.map((p) =>
+        supabaseClient
+          .from("players")
+          .update({
+            chips: p.chips - ante,
+            current_bet: p.current_bet + ante,
+            has_acted_this_round: false,
+          })
+          .eq("id", p.id),
+      ),
+    );
+
+    playersCache = playersCache.map((p) => {
+      if (p.folded || p.is_eliminated || p.left_room || p.sitting_out) return p;
+      return Object.assign({}, p, {
+        chips: p.chips - ante,
+        current_bet: p.current_bet + ante,
+        has_acted_this_round: false,
       });
-
-      await Promise.all(
-        activePlayers.map(function (p) {
-          return supabaseClient
-            .from("players")
-            .update({
-              chips: p.chips - anteAmount,
-              current_bet: p.current_bet + anteAmount,
-              has_acted_this_round: false,
-            })
-            .eq("id", p.id);
-        }),
-      );
-
-      playersCache = playersCache.map(function (p) {
-        if (p.folded || p.is_eliminated || p.left_room || p.sitting_out)
-          return p;
-        return Object.assign({}, p, {
-          chips: p.chips - anteAmount,
-          current_bet: p.current_bet + anteAmount,
-          has_acted_this_round: false,
-        });
-      });
-
-      const totalAnteCollected = anteAmount * activePlayers.length;
-      potTotal = (roomRow.pot || 0) + totalAnteCollected;
-      renderPotUI();
-
-      const activeSeatsNow = getActiveSeats(playersCache);
-      const firstToActSeat = computeBlindSeats(
-        activeSeatsNow,
-        dealerSeat,
-      ).firstToActSeat;
-
-      await supabaseClient
-        .from("rooms")
-        .update({
-          pot: potTotal,
-          ante_collected: true,
-          hand_state: HAND_STATE.BETTING,
-          current_turn_seat: firstToActSeat,
-        })
-        .eq("id", roomCode);
-
-      anteCollected = true;
-      handState = HAND_STATE.BETTING;
-      currentTurnSeat = firstToActSeat;
-
-      renderHostUI();
-      renderLeaderboard(playersCache);
-      renderActionPanel();
     });
+
+    potTotal = (roomRow.pot || 0) + ante * activePlayers.length;
+    renderPotUI();
+
+    const activeSeatsNow = getActiveSeats(playersCache);
+    const firstToActSeat = computeBlindSeats(
+      activeSeatsNow,
+      dealerSeat,
+    ).firstToActSeat;
+
+    await supabaseClient
+      .from("rooms")
+      .update({
+        pot: potTotal,
+        ante_collected: true,
+        hand_state: HAND_STATE.BETTING,
+        current_turn_seat: firstToActSeat,
+      })
+      .eq("id", roomCode);
+
+    anteCollected = true;
+    handState = HAND_STATE.BETTING;
+    currentTurnSeat = firstToActSeat;
+    renderHostUI();
+    renderLeaderboard(playersCache);
+    renderActionPanel();
   });
+});
 
 async function resolveEndOfHand(assignments) {
   const gains = {};
-  assignments.forEach(function (a) {
-    gains[a.winnerId] = (gains[a.winnerId] || 0) + a.amount;
-  });
+  assignments.forEach(
+    (a) => (gains[a.winnerId] = (gains[a.winnerId] || 0) + a.amount),
+  );
 
   const nowIso = new Date().toISOString();
-  let updatedPlayers = playersCache.map(function (p) {
+  let updatedPlayers = playersCache.map((p) => {
     const gain = gains[p.id] || 0;
     const newChips = p.chips + gain;
     const justEliminated = newChips <= 0 && !p.is_eliminated && !p.sitting_out;
-
     return Object.assign({}, p, {
       chips: newChips,
       current_bet: 0,
@@ -1108,24 +1004,17 @@ async function resolveEndOfHand(assignments) {
     });
   });
 
-  const ghosts = updatedPlayers.filter(function (p) {
-    return p.left_room;
-  });
-  const activePlayers = updatedPlayers.filter(function (p) {
-    return !p.left_room;
-  });
+  const ghosts = updatedPlayers.filter((p) => p.left_room);
+  const activePlayers = updatedPlayers.filter((p) => !p.left_room);
 
-  if (ghosts.length > 0) {
+  if (ghosts.length > 0)
     await Promise.all(
-      ghosts.map(function (p) {
-        return supabaseClient.from("players").delete().eq("id", p.id);
-      }),
+      ghosts.map((p) => supabaseClient.from("players").delete().eq("id", p.id)),
     );
-  }
 
   await Promise.all(
-    activePlayers.map(function (p) {
-      return supabaseClient
+    activePlayers.map((p) =>
+      supabaseClient
         .from("players")
         .update({
           chips: p.chips,
@@ -1137,8 +1026,8 @@ async function resolveEndOfHand(assignments) {
           eliminated_at: p.eliminated_at,
           sitting_out: p.sitting_out,
         })
-        .eq("id", p.id);
-    }),
+        .eq("id", p.id),
+    ),
   );
 
   const activeSeatsForNextHand = getActiveSeats(activePlayers);
@@ -1174,7 +1063,6 @@ async function resolveEndOfHand(assignments) {
   }
 
   await supabaseClient.from("rooms").update(roomUpdate).eq("id", roomCode);
-
   playersCache = activePlayers;
 
   if (!winCheck.finished) {
@@ -1187,7 +1075,6 @@ async function resolveEndOfHand(assignments) {
   document.getElementById("btn-action-fold").querySelector("span").textContent =
     "Desistir";
   showActionsPanel();
-
   anteCollected = false;
   currentRound = newRound;
   renderHostUI();
@@ -1197,169 +1084,131 @@ async function resolveEndOfHand(assignments) {
   if (winCheck.finished) {
     gameStatus = "finished";
     handState = HAND_STATE.NO_HAND;
-    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
-    window.location.href = "lobby.html";
+    checkGameFinishedStatus();
   }
 }
 
 function handleGivePotClick() {
   const btn = document.getElementById("btn-give-pot");
-  runGuardedAction(btn, async function () {
+  runGuardedAction(btn, async () => {
     if (!isHost) return;
-
     const assignments = [];
-
-    const contributions = playersCache.map(function (p) {
-      return { id: p.id, bet: p.current_bet, folded: p.folded };
-    });
+    const contributions = playersCache.map((p) => ({
+      id: p.id,
+      bet: p.current_bet,
+      folded: p.folded,
+    }));
     const result = computeSidePots(contributions);
 
-    result.autoAwards.forEach(function (a) {
-      assignments.push({ winnerId: a.playerId, amount: a.amount });
-    });
+    result.autoAwards.forEach((a) =>
+      assignments.push({ winnerId: a.playerId, amount: a.amount }),
+    );
 
     const groups = document.querySelectorAll(".pot-winner-group");
     for (const group of groups) {
       const potAmount = Number(group.dataset.potAmount);
       const checked = group.querySelectorAll(".pot-winner-checkbox:checked");
-
       if (checked.length === 0) {
         alert(
-          "Selecione pelo menos 1 vencedor para cada pote antes de confirmar (marque mais de 1 em caso de empate).",
+          "Selecione pelo menos 1 vencedor para cada pote antes de confirmar.",
         );
         return;
       }
-
-      const winnerIds = Array.from(checked).map(function (cb) {
-        return cb.value;
-      });
+      const winnerIds = Array.from(checked).map((cb) => cb.value);
       const splits = splitPotAmongWinners(potAmount, winnerIds);
-      splits.forEach(function (s) {
-        assignments.push({ winnerId: s.playerId, amount: s.amount });
-      });
+      splits.forEach((s) =>
+        assignments.push({ winnerId: s.playerId, amount: s.amount }),
+      );
     }
-
     if (assignments.length === 0) return;
-
     if (btn) btn.textContent = "Entregando...";
-
     await resolveEndOfHand(assignments);
   });
 }
 
 const roomSettingsModal = document.getElementById("modal-room-settings");
-
 document
   .getElementById("btn-open-room-settings")
-  .addEventListener("click", function () {
-    if (!isHost) return;
-    roomSettingsModal.classList.remove("hidden");
-    roomSettingsModal.classList.add("flex");
+  .addEventListener("click", () => {
+    if (isHost) {
+      roomSettingsModal.classList.remove("hidden");
+      roomSettingsModal.classList.add("flex");
+    }
   });
-
 document
   .getElementById("btn-close-room-settings")
-  .addEventListener("click", function () {
+  .addEventListener("click", () => {
     roomSettingsModal.classList.add("hidden");
     roomSettingsModal.classList.remove("flex");
   });
-
-roomSettingsModal.addEventListener("click", function (event) {
+roomSettingsModal.addEventListener("click", (event) => {
   if (event.target === roomSettingsModal) {
     roomSettingsModal.classList.add("hidden");
     roomSettingsModal.classList.remove("flex");
   }
 });
 
-document
-  .getElementById("btn-trocar-codigo")
-  .addEventListener("click", function () {
-    const btn = document.getElementById("btn-trocar-codigo");
-    runGuardedAction(btn, async function () {
-      if (!isHost) return;
-
-      btn.textContent = "Gerando...";
-
-      let success = false;
-      let attempts = 0;
-
-      while (!success && attempts < 5) {
-        const candidate = generateRoomCode();
-        const { error } = await supabaseClient
-          .from("rooms")
-          .update({ join_code: candidate })
-          .eq("id", roomCode);
-
-        if (!error) {
-          success = true;
-          joinCode = candidate;
-          renderRoomCodeUI();
-        }
-        attempts++;
+document.getElementById("btn-trocar-codigo").addEventListener("click", () => {
+  const btn = document.getElementById("btn-trocar-codigo");
+  runGuardedAction(btn, async () => {
+    if (!isHost) return;
+    btn.textContent = "Gerando...";
+    let success = false;
+    let attempts = 0;
+    while (!success && attempts < 5) {
+      const candidate = generateRoomCode();
+      const { error } = await supabaseClient
+        .from("rooms")
+        .update({ join_code: candidate })
+        .eq("id", roomCode);
+      if (!error) {
+        success = true;
+        joinCode = candidate;
+        renderRoomCodeUI();
       }
-
-      btn.textContent = success ? "Código trocado!" : "Trocar código da sala";
-      if (!success) {
-        alert(
-          "Não foi possível gerar um novo código agora. Tente de novo em alguns segundos.",
-        );
-      } else {
-        setTimeout(function () {
-          btn.textContent = "Trocar código da sala";
-        }, 1500);
-      }
-    });
+      attempts++;
+    }
+    btn.textContent = success ? "Código trocado!" : "Trocar código da sala";
+    if (!success) alert("Não foi possível gerar um novo código agora.");
+    else
+      setTimeout(() => {
+        btn.textContent = "Trocar código da sala";
+      }, 1500);
   });
+});
 
+// INTEGRIDADE FINANCEIRA: Bloqueio Seguro do Encerramento Manual
 document
   .getElementById("btn-encerrar-partida")
-  .addEventListener("click", function () {
+  .addEventListener("click", () => {
     const btn = document.getElementById("btn-encerrar-partida");
-    runGuardedAction(btn, async function () {
+    runGuardedAction(btn, async () => {
       if (!isHost) return;
 
-      const confirmed = confirm(
-        "Tem certeza que deseja encerrar a partida? Se houver uma mão em andamento, as apostas não resolvidas serão devolvidas.",
-      );
-      if (!confirmed) return;
+      // Regra 5: Bloqueio de fuga. Protege contra perda de fichas na ausência de ledger.
+      if (handState !== HAND_STATE.NO_HAND || potTotal > 0) {
+        alert(
+          "Não é possível encerrar a partida enquanto há uma mão em andamento ou fichas no pote.\n\nPor favor, jogue a mão até o fim ou distribua o pote antes de tentar encerrar.",
+        );
+        return;
+      }
+
+      if (
+        !confirm("Tem certeza que deseja encerrar a partida definitivamente?")
+      )
+        return;
 
       btn.textContent = "Encerrando...";
 
-      const refunds = [];
-      let updatedPlayers = playersCache.map(function (p) {
-        if (p.current_bet > 0) {
-          refunds.push(p);
-          return Object.assign({}, p, {
-            chips: p.chips + p.current_bet,
-            current_bet: 0,
-          });
-        }
-        return p;
-      });
-
-      if (refunds.length > 0) {
-        await Promise.all(
-          refunds.map(function (p) {
-            return supabaseClient
-              .from("players")
-              .update({ chips: p.chips + p.current_bet, current_bet: 0 })
-              .eq("id", p.id);
-          }),
-        );
-      }
-
-      const ghosts = updatedPlayers.filter(function (p) {
-        return p.left_room;
-      });
+      let updatedPlayers = playersCache;
+      const ghosts = updatedPlayers.filter((p) => p.left_room);
       if (ghosts.length > 0) {
         await Promise.all(
-          ghosts.map(function (p) {
-            return supabaseClient.from("players").delete().eq("id", p.id);
-          }),
+          ghosts.map((p) =>
+            supabaseClient.from("players").delete().eq("id", p.id),
+          ),
         );
-        updatedPlayers = updatedPlayers.filter(function (p) {
-          return !p.left_room;
-        });
+        updatedPlayers = updatedPlayers.filter((p) => !p.left_room);
       }
 
       playersCache = updatedPlayers;
@@ -1379,37 +1228,31 @@ document
 
       gameStatus = "finished";
       handState = HAND_STATE.NO_HAND;
-      if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
-      window.location.href = "lobby.html";
+      checkGameFinishedStatus();
     });
   });
 
 function handleKickPlayer(playerId, playerName, button) {
-  runGuardedAction(button, async function () {
+  runGuardedAction(button, async () => {
     if (!isHost || !allowKick) return;
-    const confirmed = confirm(
-      "Expulsar " + playerName + " da sala? Essa ação não pode ser desfeita.",
-    );
-    if (!confirmed) return;
+    if (
+      !confirm(
+        "Expulsar " + playerName + " da sala? Essa ação não pode ser desfeita.",
+      )
+    )
+      return;
 
-    const kickedPlayer = playersCache.find(function (p) {
-      return p.id === playerId;
-    });
-
+    const kickedPlayer = playersCache.find((p) => p.id === playerId);
     if (kickedPlayer && kickedPlayer.current_bet > 0) {
       kickedPlayer.left_room = true;
       kickedPlayer.folded = true;
       kickedPlayer.chips = 0;
       kickedPlayer.is_eliminated = true;
     } else {
-      playersCache = playersCache.filter(function (p) {
-        return p.id !== playerId;
-      });
+      playersCache = playersCache.filter((p) => p.id !== playerId);
     }
-
     renderLeaderboard(playersCache);
     renderGivePotPanel();
-
     await removePlayerFromRoom(playerId);
 
     if (
@@ -1418,49 +1261,40 @@ function handleKickPlayer(playerId, playerName, button) {
       handState === HAND_STATE.BETTING
     ) {
       const occupiedSeats = getOccupiedSeats(playersCache);
-      const maxBet = getMaxTableBet();
       const nextSeat = getNextSeatToAct(
         occupiedSeats,
         playersCache,
-        maxBet,
+        getMaxTableBet(),
         kickedPlayer.seat_number,
       );
-
       currentTurnSeat = nextSeat;
       handState =
         nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
-
       await supabaseClient
         .from("rooms")
         .update({ current_turn_seat: nextSeat, hand_state: handState })
         .eq("id", roomCode);
-
       renderHostUI();
       renderActionPanel();
     }
   });
 }
 
-document
-  .getElementById("btn-request-rebuy")
-  .addEventListener("click", function () {
-    const btn = document.getElementById("btn-request-rebuy");
-    runGuardedAction(btn, async function () {
-      btn.textContent = "Enviando...";
-
-      await supabaseClient
-        .from("players")
-        .update({ needs_rebuy_approval: true })
-        .eq("id", myPlayerId);
-
-      btn.textContent = "Pedir para voltar a jogar";
-    });
+document.getElementById("btn-request-rebuy").addEventListener("click", () => {
+  const btn = document.getElementById("btn-request-rebuy");
+  runGuardedAction(btn, async () => {
+    btn.textContent = "Enviando...";
+    await supabaseClient
+      .from("players")
+      .update({ needs_rebuy_approval: true })
+      .eq("id", myPlayerId);
+    btn.textContent = "Pedir para voltar a jogar";
   });
+});
 
 function handleApproveRebuy(playerId, button) {
-  runGuardedAction(button, async function () {
+  runGuardedAction(button, async () => {
     if (!isHost) return;
-
     await supabaseClient
       .from("players")
       .update({
@@ -1478,25 +1312,21 @@ function handleApproveRebuy(playerId, button) {
 }
 
 const rulesModal = document.getElementById("modal-rules");
-
 function openRulesModal() {
   rulesModal.classList.remove("hidden");
   rulesModal.classList.add("flex");
 }
-
 function closeRulesModal() {
   rulesModal.classList.add("hidden");
   rulesModal.classList.remove("flex");
 }
-
 document
   .getElementById("btn-rules-fab")
   .addEventListener("click", openRulesModal);
 document
   .getElementById("btn-close-rules")
   .addEventListener("click", closeRulesModal);
-
-rulesModal.addEventListener("click", function (event) {
+rulesModal.addEventListener("click", (event) => {
   if (event.target === rulesModal) closeRulesModal();
 });
 
@@ -1510,33 +1340,30 @@ function openTransferModal(mode = "leave") {
   transferMode = mode;
   selectedNewHostId = null;
   btnConfirmTransfer.disabled = true;
-
   transferTitle.textContent =
     mode === "leave" ? "Antes de sair..." : "Passar a coroa";
   btnConfirmTransfer.textContent =
     mode === "leave" ? "Confirmar e sair" : "Confirmar transferência";
 
-  const others = playersCache.filter(function (p) {
-    return p.id !== myPlayerId && !p.left_room;
-  });
-
+  const others = playersCache.filter(
+    (p) => p.id !== myPlayerId && !p.left_room,
+  );
   if (others.length === 0) {
     if (mode === "leave") {
       transferIntro.textContent =
-        "Você é o único jogador na mesa. Sair vai encerrar a sala.";
+        "Você é o único jogador. Sair vai encerrar a sala.";
       transferList.innerHTML = "";
       btnConfirmTransfer.disabled = false;
       btnConfirmTransfer.textContent = "Encerrar sala e sair";
     } else {
-      transferIntro.textContent =
-        "Você é o único jogador na mesa. Não há ninguém para receber a coroa.";
+      transferIntro.textContent = "Não há ninguém para receber a coroa.";
       transferList.innerHTML = "";
       btnConfirmTransfer.disabled = true;
     }
   } else {
     transferIntro.textContent = "Escolha quem vai assumir como Host da mesa.";
     transferList.innerHTML = "";
-    others.forEach(function (p) {
+    others.forEach((p) => {
       const item = document.createElement("button");
       item.type = "button";
       item.className =
@@ -1549,22 +1376,17 @@ function openTransferModal(mode = "leave") {
         '<span class="text-cream/40 text-xs font-body">' +
         formatMoney(p.chips) +
         "</span>";
-
-      item.addEventListener("click", function () {
+      item.addEventListener("click", () => {
         selectedNewHostId = p.id;
         btnConfirmTransfer.disabled = false;
         document
           .querySelectorAll(".transfer-host-option")
-          .forEach(function (el) {
-            el.classList.remove("is-turn");
-          });
+          .forEach((el) => el.classList.remove("is-turn"));
         item.classList.add("is-turn");
       });
-
       transferList.appendChild(item);
     });
   }
-
   transferModal.classList.remove("hidden");
   transferModal.classList.add("flex");
 }
@@ -1573,28 +1395,23 @@ function closeTransferModal() {
   transferModal.classList.add("hidden");
   transferModal.classList.remove("flex");
 }
-
-document
-  .getElementById("btn-passar-coroa")
-  .addEventListener("click", function () {
-    if (!isHost) return;
+document.getElementById("btn-passar-coroa").addEventListener("click", () => {
+  if (isHost) {
     roomSettingsModal.classList.add("hidden");
     roomSettingsModal.classList.remove("flex");
     openTransferModal("stay");
-  });
-
+  }
+});
 document
   .getElementById("btn-cancel-transfer")
   .addEventListener("click", closeTransferModal);
-
 document
   .getElementById("link-leave-room")
-  .addEventListener("click", async function (event) {
+  .addEventListener("click", async (event) => {
+    event.preventDefault();
     if (isHost) {
-      event.preventDefault();
       openTransferModal("leave");
     } else {
-      event.preventDefault();
       if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
       await removePlayerFromRoom(myPlayerId);
       clearSession();
@@ -1602,11 +1419,10 @@ document
     }
   });
 
-btnConfirmTransfer.addEventListener("click", function () {
-  runGuardedAction(btnConfirmTransfer, async function () {
+btnConfirmTransfer.addEventListener("click", () => {
+  runGuardedAction(btnConfirmTransfer, async () => {
     btnConfirmTransfer.textContent =
       transferMode === "leave" ? "Saindo..." : "Transferindo...";
-
     if (selectedNewHostId === null) {
       if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
       await supabaseClient.from("rooms").delete().eq("id", roomCode);
@@ -1625,7 +1441,6 @@ btnConfirmTransfer.addEventListener("click", function () {
         .from("rooms")
         .update({ host_id: selectedNewHostId })
         .eq("id", roomCode);
-
       if (transferMode === "leave") {
         if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
         await removePlayerFromRoom(myPlayerId);
@@ -1653,7 +1468,6 @@ async function sendHeartbeat() {
     .update({ last_seen_at: new Date().toISOString() })
     .eq("id", myPlayerId);
 }
-
 async function promoteMeToHost(oldHostId) {
   await supabaseClient
     .from("players")
@@ -1668,27 +1482,21 @@ async function promoteMeToHost(oldHostId) {
     .update({ host_id: myPlayerId })
     .eq("id", roomCode);
 }
-
 async function kickAfkPlayer(afkPlayer) {
   await removePlayerFromRoom(afkPlayer.id);
-
   if (
     afkPlayer.seat_number === currentTurnSeat &&
     handState === HAND_STATE.BETTING
   ) {
-    const occupiedSeats = getOccupiedSeats(playersCache);
-    const maxBet = getMaxTableBet();
     const nextSeat = getNextSeatToAct(
-      occupiedSeats,
+      getOccupiedSeats(playersCache),
       playersCache,
-      maxBet,
+      getMaxTableBet(),
       afkPlayer.seat_number,
     );
-
     currentTurnSeat = nextSeat;
     handState =
       nextSeat === null ? HAND_STATE.ROUND_COMPLETE : HAND_STATE.BETTING;
-
     await supabaseClient
       .from("rooms")
       .update({ current_turn_seat: nextSeat, hand_state: handState })
@@ -1698,66 +1506,49 @@ async function kickAfkPlayer(afkPlayer) {
 
 async function checkPresence() {
   if (!playersCache || playersCache.length === 0) return;
-
   const nowMs = Date.now();
-  const currentHost = playersCache.find(function (p) {
-    return p.is_host && !p.left_room;
-  });
-
+  const currentHost = playersCache.find((p) => p.is_host && !p.left_room);
   if (currentHost && isPlayerAfk(currentHost.last_seen_at, nowMs)) {
     const nextHostId = computeNextHostByJoinOrder(
       playersCache,
       nowMs,
       currentHost.id,
     );
-    if (nextHostId === myPlayerId) {
-      await promoteMeToHost(currentHost.id);
-    }
+    if (nextHostId === myPlayerId) await promoteMeToHost(currentHost.id);
     return;
   }
-
   if (!isHost) return;
-  const activeCount = playersCache.filter(function (p) {
-    return !p.left_room;
-  }).length;
+  const activeCount = playersCache.filter((p) => !p.left_room).length;
   if (activeCount <= 1) return;
-
-  const afkPlayer = playersCache.find(function (p) {
-    return (
-      p.id !== myPlayerId && !p.left_room && isPlayerAfk(p.last_seen_at, nowMs)
-    );
-  });
-
-  if (afkPlayer) {
-    await kickAfkPlayer(afkPlayer);
-  }
+  const afkPlayer = playersCache.find(
+    (p) =>
+      p.id !== myPlayerId && !p.left_room && isPlayerAfk(p.last_seen_at, nowMs),
+  );
+  if (afkPlayer) await kickAfkPlayer(afkPlayer);
 }
 
 function tickAfkCountdowns() {
   const nowMs = Date.now();
-  document.querySelectorAll(".afk-countdown").forEach(function (el) {
+  document.querySelectorAll(".afk-countdown").forEach((el) => {
     const lastSeenAt = el.dataset.lastSeenAt;
     if (!lastSeenAt) return;
-    const remaining = getAfkRemainingMs(lastSeenAt, nowMs);
-    el.textContent = "expulso em " + formatCountdown(remaining);
+    el.textContent =
+      "expulso em " + formatCountdown(getAfkRemainingMs(lastSeenAt, nowMs));
   });
 }
 
 async function handleSoloWinner(soloPlayer) {
-  if (!soloPlayer.is_host) {
+  if (!soloPlayer.is_host)
     await supabaseClient
       .from("players")
       .update({ is_host: true })
       .eq("id", soloPlayer.id);
-  }
-
   const { data: roomRow } = await supabaseClient
     .from("rooms")
     .select("pot")
     .eq("id", roomCode)
     .single();
   const potAmount = roomRow ? roomRow.pot : potTotal;
-
   const finalChips = soloPlayer.chips + potAmount;
   const finalResults = [
     {
@@ -1772,7 +1563,6 @@ async function handleSoloWinner(soloPlayer) {
     .from("players")
     .update({ chips: finalChips, current_bet: 0 })
     .eq("id", soloPlayer.id);
-
   await supabaseClient
     .from("rooms")
     .update({
@@ -1789,29 +1579,19 @@ async function handleSoloWinner(soloPlayer) {
   if (soloPlayer.id === myPlayerId) {
     gameStatus = "finished";
     handState = HAND_STATE.NO_HAND;
-    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    if (presenceCheckInterval) clearInterval(presenceCheckInterval);
-    if (countdownTickInterval) clearInterval(countdownTickInterval);
-    window.location.href = "lobby.html";
+    checkGameFinishedStatus();
   }
 }
 
 function startPresenceSystem() {
   sendHeartbeat();
-
-  heartbeatInterval = setInterval(function () {
+  heartbeatInterval = setInterval(() => {
     if (!document.hidden) sendHeartbeat();
   }, 15000);
-
-  document.addEventListener("visibilitychange", function () {
+  document.addEventListener("visibilitychange", () => {
     if (!document.hidden) sendHeartbeat();
   });
-
-  presenceCheckInterval = setInterval(function () {
-    checkPresence();
-  }, 10000);
-
+  presenceCheckInterval = setInterval(checkPresence, 10000);
   countdownTickInterval = setInterval(tickAfkCountdowns, 1000);
 }
 
@@ -1821,24 +1601,16 @@ async function refreshPlayers() {
     .select("*")
     .eq("room_code", roomCode)
     .order("joined_at", { ascending: true });
-
   if (error) {
-    console.error(
-      "[GhostStackPoker] Falha ao buscar jogadores da sala:",
-      error,
-    );
     reportCriticalErrorOnce(
       "players-fetch",
-      "Não consegui carregar os jogadores da sala: " + error.message,
+      "Não consegui carregar os jogadores: " + error.message,
     );
     return;
   }
   if (!data) return;
 
-  const me = data.find(function (p) {
-    return p.id === myPlayerId;
-  });
-
+  const me = data.find((p) => p.id === myPlayerId);
   if (!me || me.left_room) {
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
     clearSession();
@@ -1854,18 +1626,12 @@ async function refreshPlayers() {
   if (
     previousPlayerCount !== null &&
     previousPlayerCount > 1 &&
-    data.filter(function (p) {
-      return !p.left_room;
-    }).length === 1
+    data.filter((p) => !p.left_room).length === 1
   ) {
-    const soloPlayer = data.find(function (p) {
-      return !p.left_room;
-    });
+    const soloPlayer = data.find((p) => !p.left_room);
     if (soloPlayer) handleSoloWinner(soloPlayer);
   }
-  previousPlayerCount = data.filter(function (p) {
-    return !p.left_room;
-  }).length;
+  previousPlayerCount = data.filter((p) => !p.left_room).length;
 
   if (me.is_host !== isHost) {
     isHost = me.is_host;
@@ -1879,24 +1645,19 @@ async function refreshPlayers() {
   }
 
   hasFolded = me.folded;
-  const foldBtn = document.getElementById("btn-action-fold");
-  foldBtn.querySelector("span").textContent = hasFolded
-    ? "Voltar pra rodada"
-    : "Desistir";
+  document.getElementById("btn-action-fold").querySelector("span").textContent =
+    hasFolded ? "Voltar pra rodada" : "Desistir";
   renderChipsUI();
-  document.querySelectorAll(".chip").forEach(function (c) {
+  document.querySelectorAll(".chip").forEach((c) => {
     if (hasFolded) c.disabled = true;
   });
 
-  if (me.is_eliminated) {
-    showEliminatedPanel(me.needs_rebuy_approval);
-  } else if (
+  if (me.is_eliminated) showEliminatedPanel(me.needs_rebuy_approval);
+  else if (
     !document.getElementById("panel-eliminated").classList.contains("hidden")
-  ) {
+  )
     showActionsPanel();
-  } else {
-    renderActionPanel();
-  }
+  else renderActionPanel();
 }
 
 async function refreshRoomInfo() {
@@ -1905,27 +1666,15 @@ async function refreshRoomInfo() {
     .select("*")
     .eq("id", roomCode)
     .single();
-
   if (error) {
-    console.error("[GhostStackPoker] Falha ao buscar dados da sala:", error);
     reportCriticalErrorOnce(
       "room-fetch",
-      'Não consegui carregar os dados da sala (código "' +
-        roomCode +
-        '"): ' +
-        error.message,
+      "Erro ao carregar dados da sala: " + error.message,
     );
     return;
   }
   if (!room) {
-    console.error(
-      "[GhostStackPoker] Sala não encontrada no banco para o id:",
-      roomCode,
-    );
-    reportCriticalErrorOnce(
-      "room-missing",
-      "Esta sala não foi encontrada no banco de dados. Pode ser que a criação da sala tenha falhado — volte pro Lobby e tente criar de novo.",
-    );
+    reportCriticalErrorOnce("room-missing", "Sala não encontrada no banco.");
     return;
   }
 
@@ -1941,6 +1690,8 @@ async function refreshRoomInfo() {
   currentRound = room.current_round;
   gameStatus = room.game_status;
   startingChips = room.starting_chips;
+  anteAmount = room.ante_amount || 0;
+  finalResultsCache = room.final_results;
 
   renderRoomCodeUI();
   renderPotUI();
@@ -1948,15 +1699,156 @@ async function refreshRoomInfo() {
   renderLeaderboard(playersCache);
   renderGivePotPanel();
   renderActionPanel();
-
-  redirectToLobbyIfFinished();
+  checkGameFinishedStatus();
 }
 
-function redirectToLobbyIfFinished() {
-  if (gameStatus === "finished") {
-    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
-    window.location.href = "lobby.html";
+// FASE 8: Tela de Resultados Dinâmica e Reconfiguração Segura
+function checkGameFinishedStatus() {
+  let overlay = document.getElementById("final-results-overlay");
+
+  if (gameStatus !== "finished") {
+    if (overlay) overlay.classList.add("hidden");
+    return;
   }
+
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "final-results-overlay";
+    overlay.className =
+      "fixed inset-0 bg-forest z-50 flex flex-col items-center justify-start p-6 overflow-y-auto";
+    document.body.appendChild(overlay);
+  }
+
+  overlay.classList.remove("hidden");
+  overlay.innerHTML = "";
+
+  const title = document.createElement("h2");
+  title.className = "text-gold font-display text-3xl mb-6 mt-4 text-center";
+  title.textContent = "Partida Encerrada";
+  overlay.appendChild(title);
+
+  if (finalResultsCache && finalResultsCache.length > 0) {
+    const list = document.createElement("div");
+    list.className = "w-full max-w-md bg-forest-light/50 rounded-xl p-4 mb-6";
+    finalResultsCache
+      .sort((a, b) => a.rank - b.rank)
+      .forEach((r) => {
+        const item = document.createElement("div");
+        item.className =
+          "flex justify-between items-center py-2 border-b border-cream/10 last:border-0 text-cream font-body";
+        item.innerHTML = `<span>#${r.rank} ${escapeHtml(r.name)}</span><span class="text-gold font-bold">${formatMoney(r.chips)}</span>`;
+        list.appendChild(item);
+      });
+    overlay.appendChild(list);
+  }
+
+  if (isHost) {
+    const configPanel = document.createElement("div");
+    configPanel.className =
+      "bg-forest-light p-4 rounded-xl w-full max-w-md mt-2 border border-gold/20";
+    configPanel.innerHTML = `
+      <h3 class="text-cream font-body text-lg mb-4 text-center">Configurar Nova Partida</h3>
+      <div class="mb-4 flex items-center gap-2 bg-forest/50 p-3 rounded">
+        <input type="checkbox" id="reconfig-preserve-chips" checked class="w-4 h-4 accent-gold cursor-pointer">
+        <label for="reconfig-preserve-chips" class="text-cream text-sm font-body cursor-pointer select-none">Preservar saldos finais da partida anterior</label>
+      </div>
+      <div class="mb-4">
+        <label class="block text-cream/60 text-xs font-body mb-1">Fichas Iniciais (para os zerados ou caso desmarque a opção acima)</label>
+        <input type="number" id="reconfig-starting-chips" value="${startingChips}" class="w-full bg-forest text-cream font-body rounded p-2 border border-cream/10 outline-none focus:border-gold">
+      </div>
+      <div class="mb-6">
+        <label class="block text-cream/60 text-xs font-body mb-1">Novo Ante</label>
+        <input type="number" id="reconfig-ante" value="${anteAmount}" class="w-full bg-forest text-cream font-body rounded p-2 border border-cream/10 outline-none focus:border-gold">
+      </div>
+      <button id="btn-reconfig-start" class="w-full bg-gold text-ink font-body font-semibold py-3 rounded-lg hover:bg-gold/90 transition-colors shadow-lg">Iniciar Nova Partida na mesma mesa</button>
+    `;
+    overlay.appendChild(configPanel);
+
+    document
+      .getElementById("btn-reconfig-start")
+      .addEventListener("click", () => {
+        if (!isHost) return; // TRAVA DE SEGURANÇA DO CLIENTE
+
+        const btn = document.getElementById("btn-reconfig-start");
+        runGuardedAction(btn, async () => {
+          const preserveChips = document.getElementById(
+            "reconfig-preserve-chips",
+          ).checked;
+          const newStartingChips =
+            parseInt(
+              document.getElementById("reconfig-starting-chips").value,
+            ) || startingChips;
+          const newAnte =
+            parseInt(document.getElementById("reconfig-ante").value) || 0;
+
+          btn.textContent = "Preparando a mesa...";
+          const activePlayers = playersCache.filter((p) => !p.left_room);
+
+          await Promise.all(
+            activePlayers.map((p) => {
+              let finalChips;
+              if (preserveChips) {
+                finalChips = p.chips > 0 ? p.chips : newStartingChips;
+              } else {
+                finalChips = newStartingChips;
+              }
+              const isEliminated = finalChips <= 0;
+
+              return supabaseClient
+                .from("players")
+                .update({
+                  chips: finalChips,
+                  is_eliminated: isEliminated,
+                  eliminated_at: isEliminated ? new Date().toISOString() : null,
+                  current_bet: 0,
+                  folded: false,
+                  has_acted_this_round: false,
+                  is_all_in: false,
+                  sitting_out: false,
+                  needs_rebuy_approval: false,
+                })
+                .eq("id", p.id);
+            }),
+          );
+
+          await supabaseClient
+            .from("rooms")
+            .update({
+              game_status: "in_progress",
+              hand_state: HAND_STATE.NO_HAND,
+              pot: 0,
+              current_round: 1,
+              current_turn_seat: null,
+              dealer_seat: null,
+              final_results: null,
+              ante_collected: false,
+              side_pots: [],
+              starting_chips: newStartingChips,
+              ante_amount: newAnte,
+            })
+            .eq("id", roomCode);
+        });
+      });
+  } else {
+    const waitMsg = document.createElement("p");
+    waitMsg.className =
+      "text-cream/60 font-body text-center mt-8 px-4 animate-pulse";
+    waitMsg.textContent =
+      "Aguardando o Host reconfigurar a sala para uma nova partida...";
+    overlay.appendChild(waitMsg);
+  }
+
+  const leaveBtn = document.createElement("button");
+  leaveBtn.className =
+    "mt-8 mb-4 text-cream/40 underline font-body text-sm hover:text-cream/60";
+  leaveBtn.textContent = "Sair da sala";
+  leaveBtn.addEventListener("click", async () => {
+    if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+    await removePlayerFromRoom(myPlayerId);
+    clearSession();
+    window.location.href = "home.html";
+  });
+  overlay.appendChild(leaveBtn);
 }
 
 function subscribeToRoom() {
@@ -1972,7 +1864,7 @@ function subscribeToRoom() {
         table: "players",
         filter: "room_code=eq." + roomCode,
       },
-      function () {
+      () => {
         refreshPlayers();
       },
     )
@@ -1984,7 +1876,7 @@ function subscribeToRoom() {
         table: "rooms",
         filter: "id=eq." + roomCode,
       },
-      function (payload) {
+      (payload) => {
         potTotal = payload.new.pot;
         joinCode = payload.new.join_code;
         anteCollected = payload.new.ante_collected;
@@ -1996,6 +1888,8 @@ function subscribeToRoom() {
         roundLimit = payload.new.round_limit;
         currentRound = payload.new.current_round;
         gameStatus = payload.new.game_status;
+        anteAmount = payload.new.ante_amount;
+        finalResultsCache = payload.new.final_results;
 
         renderPotUI();
         renderRoomCodeUI();
@@ -2003,28 +1897,22 @@ function subscribeToRoom() {
         renderLeaderboard(playersCache);
         renderGivePotPanel();
         renderActionPanel();
-
-        redirectToLobbyIfFinished();
+        checkGameFinishedStatus();
       },
     )
     .subscribe();
 }
 
 let tableSyncInterval = null;
-
 function startTableSyncPolling() {
   if (tableSyncInterval) clearInterval(tableSyncInterval);
-  tableSyncInterval = setInterval(async function () {
-    if (document.hidden) return;
-    if (isProcessingAction) return;
+  tableSyncInterval = setInterval(async () => {
+    if (document.hidden || isProcessingAction) return;
     try {
       await refreshRoomInfo();
       await refreshPlayers();
     } catch (e) {
-      console.warn(
-        "[GhostStackPoker] Polling de sincronização encontrou aviso leve:",
-        e,
-      );
+      console.warn("[GhostStackPoker] Polling leve aviso:", e);
     }
   }, 2500);
 }
