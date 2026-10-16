@@ -1,5 +1,5 @@
 // ===========================================================
-// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Visual Fixo)
+// GhostStackPoker — js/partida.js (Fase 8 + Integridade + Visual Blindado)
 // ===========================================================
 
 import { supabaseClient } from "./supabase.js";
@@ -72,7 +72,7 @@ function reportCriticalErrorOnce(key, message) {
 const session = loadSession();
 if (!session) {
   window.location.href = "home.html";
-  throw new Error("Sem sessão ativa — redirecionando para o lobby.");
+  throw new Error("Sem sessão activa — redireccionando para o lobby.");
 }
 
 const roomCode = session.roomCode;
@@ -1236,7 +1236,9 @@ function handleKickPlayer(playerId, playerName, button) {
     if (!isHost || !allowKick) return;
     if (
       !confirm(
-        "Expulsar " + playerName + " da sala? Essa ação não pode ser desfeita.",
+        "Expulsar " +
+          playerName +
+          " da sala? Essa acção não pode ser desfeita.",
       )
     )
       return;
@@ -1701,7 +1703,7 @@ async function refreshRoomInfo() {
   checkGameFinishedStatus();
 }
 
-// FASE 8: Tela de Resultados Dinâmica e Reconfiguração (Correção Visual JIT Tailwind)
+// FASE 8: Tela de Resultados Dinâmica e Reconfiguração (Correção Visual Absoluta)
 function checkGameFinishedStatus() {
   let overlay = document.getElementById("final-results-overlay");
 
@@ -1713,31 +1715,33 @@ function checkGameFinishedStatus() {
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "final-results-overlay";
-    // Estilo blindado com cores hexadecimais para garantir o bloqueio da tela de fundo
-    overlay.style.cssText =
-      "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #0F291E; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 24px; overflow-y: auto; font-family: ui-sans-serif, system-ui, sans-serif;";
     document.body.appendChild(overlay);
   }
 
-  overlay.style.display = "flex";
+  // PATCH VISUAL: Limpa qualquer classe que esteja a gerar conflito ou cache
+  overlay.className = "";
+  // Força os estilos absolutos usando !important em cada propriedade para sobrepor a mesa
+  overlay.style.cssText =
+    "position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background-color: #0F291E !important; z-index: 999999 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: flex-start !important; padding: 24px !important; overflow-y: auto !important; font-family: ui-sans-serif, system-ui, sans-serif !important;";
+
   overlay.innerHTML = "";
 
   const title = document.createElement("h2");
   title.style.cssText =
-    "color: #C9A227; font-size: 1.875rem; margin-bottom: 24px; margin-top: 16px; text-align: center; font-family: ui-serif, Georgia, serif;";
+    "color: #C9A227 !important; font-size: 1.875rem !important; margin-bottom: 24px !important; margin-top: 16px !important; text-align: center !important; font-family: ui-serif, Georgia, serif !important;";
   title.textContent = "Partida Encerrada";
   overlay.appendChild(title);
 
   if (finalResultsCache && finalResultsCache.length > 0) {
     const list = document.createElement("div");
     list.style.cssText =
-      "width: 100%; max-width: 28rem; background-color: #163829; border-radius: 0.75rem; padding: 16px; margin-bottom: 24px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);";
+      "width: 100% !important; max-width: 28rem !important; background-color: #163829 !important; border-radius: 0.75rem !important; padding: 16px !important; margin-bottom: 24px !important; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;";
     finalResultsCache
       .sort((a, b) => a.rank - b.rank)
       .forEach((r) => {
         const item = document.createElement("div");
         item.style.cssText =
-          "display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(241, 235, 225, 0.1); color: #F1EBE1;";
+          "display: flex !important; justify-content: space-between !important; align-items: center !important; padding: 8px 0 !important; border-bottom: 1px solid rgba(241, 235, 225, 0.1) !important; color: #F1EBE1 !important;";
         item.innerHTML = `<span>#${r.rank} ${escapeHtml(r.name)}</span><span style="color: #C9A227; font-weight: bold;">${formatMoney(r.chips)}</span>`;
         list.appendChild(item);
       });
@@ -1748,33 +1752,33 @@ function checkGameFinishedStatus() {
   if (isHost) {
     const configPanel = document.createElement("div");
     configPanel.style.cssText =
-      "background-color: #163829; padding: 20px; border-radius: 0.75rem; width: 100%; max-width: 28rem; border: 1px solid rgba(201, 162, 39, 0.2); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); box-sizing: border-box;";
+      "background-color: #163829 !important; padding: 20px !important; border-radius: 0.75rem !important; width: 100% !important; max-width: 28rem !important; border: 1px solid rgba(201, 162, 39, 0.2) !important; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5) !important; box-sizing: border-box !important;";
     configPanel.innerHTML = `
-      <h3 style="color: #F1EBE1; font-size: 1.125rem; margin-bottom: 16px; text-align: center; font-weight: 600;">Configurar Nova Partida</h3>
+      <h3 style="color: #F1EBE1 !important; font-size: 1.125rem !important; margin-bottom: 16px !important; text-align: center !important; font-weight: 600 !important;">Configurar Nova Partida</h3>
       
-      <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px; background-color: #0F291E; padding: 12px; border-radius: 0.25rem;">
-        <input type="checkbox" id="reconfig-preserve-chips" checked style="width: 1.25rem; height: 1.25rem; accent-color: #C9A227; cursor: pointer; flex-shrink: 0;">
-        <label for="reconfig-preserve-chips" style="color: #F1EBE1; font-size: 0.875rem; cursor: pointer; user-select: none;">Preservar saldos finais da partida anterior</label>
+      <div style="margin-bottom: 16px !important; display: flex !important; align-items: center !important; gap: 8px !important; background-color: #0F291E !important; padding: 12px !important; border-radius: 0.25rem !important;">
+        <input type="checkbox" id="reconfig-preserve-chips" checked style="width: 1.25rem !important; height: 1.25rem !important; accent-color: #C9A227 !important; cursor: pointer !important; flex-shrink: 0 !important;">
+        <label for="reconfig-preserve-chips" style="color: #F1EBE1 !important; font-size: 0.875rem !important; cursor: pointer !important; user-select: none !important;">Preservar saldos finais da partida anterior</label>
       </div>
       
-      <div style="margin-bottom: 16px;">
-        <label style="display: block; color: rgba(241, 235, 225, 0.6); font-size: 0.75rem; margin-bottom: 4px;">Fichas Iniciais (para os zerados ou caso desmarque a opção acima)</label>
-        <input type="number" id="reconfig-starting-chips" value="${startingChips}" style="width: 100%; background-color: #0F291E; color: #F1EBE1; border-radius: 0.25rem; padding: 12px; border: 1px solid rgba(241, 235, 225, 0.1); outline: none; box-sizing: border-box;">
+      <div style="margin-bottom: 16px !important;">
+        <label style="display: block !important; color: rgba(241, 235, 225, 0.6) !important; font-size: 0.75rem !important; margin-bottom: 4px !important;">Fichas Iniciais (para os zerados ou caso desmarque a opção acima)</label>
+        <input type="number" id="reconfig-starting-chips" value="${startingChips}" style="width: 100% !important; background-color: #0F291E !important; color: #F1EBE1 !important; border-radius: 0.25rem !important; padding: 12px !important; border: 1px solid rgba(241, 235, 225, 0.2) !important; outline: none !important; box-sizing: border-box !important;">
       </div>
       
-      <div style="margin-bottom: 24px;">
-        <label style="display: block; color: rgba(241, 235, 225, 0.6); font-size: 0.75rem; margin-bottom: 4px;">Novo Ante</label>
-        <input type="number" id="reconfig-ante" value="${anteAmount}" style="width: 100%; background-color: #0F291E; color: #F1EBE1; border-radius: 0.25rem; padding: 12px; border: 1px solid rgba(241, 235, 225, 0.1); outline: none; box-sizing: border-box;">
+      <div style="margin-bottom: 24px !important;">
+        <label style="display: block !important; color: rgba(241, 235, 225, 0.6) !important; font-size: 0.75rem !important; margin-bottom: 4px !important;">Novo Ante</label>
+        <input type="number" id="reconfig-ante" value="${anteAmount}" style="width: 100% !important; background-color: #0F291E !important; color: #F1EBE1 !important; border-radius: 0.25rem !important; padding: 12px !important; border: 1px solid rgba(241, 235, 225, 0.2) !important; outline: none !important; box-sizing: border-box !important;">
       </div>
       
-      <button id="btn-reconfig-start" style="width: 100%; background-color: #C9A227; color: #0A110E; font-weight: bold; padding: 12px; border-radius: 0.5rem; border: none; cursor: pointer; font-size: 1rem;">Iniciar Nova Partida na mesma mesa</button>
+      <button id="btn-reconfig-start" style="width: 100% !important; background-color: #C9A227 !important; color: #0A110E !important; font-weight: bold !important; padding: 12px !important; border-radius: 0.5rem !important; border: none !important; cursor: pointer !important; font-size: 1rem !important;">Iniciar Nova Partida na mesma mesa</button>
     `;
     overlay.appendChild(configPanel);
 
     document
       .getElementById("btn-reconfig-start")
       .addEventListener("click", () => {
-        if (!isHost) return; // TRAVA DE SEGURANÇA CLIENTE (Patch A)
+        if (!isHost) return;
 
         const btn = document.getElementById("btn-reconfig-start");
         runGuardedAction(btn, async () => {
@@ -1795,7 +1799,7 @@ function checkGameFinishedStatus() {
             activePlayers.map((p) => {
               let finalChips;
               if (preserveChips) {
-                finalChips = p.chips > 0 ? p.chips : newStartingChips; // Patch A: Reseta os zerados, mantém os vivos
+                finalChips = p.chips > 0 ? p.chips : newStartingChips;
               } else {
                 finalChips = newStartingChips;
               }
@@ -1839,7 +1843,7 @@ function checkGameFinishedStatus() {
   } else {
     const waitMsg = document.createElement("p");
     waitMsg.style.cssText =
-      "color: rgba(241, 235, 225, 0.6); text-align: center; margin-top: 32px; padding: 0 16px;";
+      "color: rgba(241, 235, 225, 0.6) !important; text-align: center !important; margin-top: 32px !important; padding: 0 16px !important;";
     waitMsg.textContent =
       "Aguardando o Host reconfigurar a sala para uma nova partida...";
     overlay.appendChild(waitMsg);
@@ -1847,7 +1851,7 @@ function checkGameFinishedStatus() {
 
   const leaveBtn = document.createElement("button");
   leaveBtn.style.cssText =
-    "margin-top: 32px; margin-bottom: 16px; color: rgba(241, 235, 225, 0.4); text-decoration: underline; background: none; border: none; cursor: pointer;";
+    "margin-top: 32px !important; margin-bottom: 16px !important; color: rgba(241, 235, 225, 0.4) !important; text-decoration: underline !important; background: none !important; border: none !important; cursor: pointer !important;";
   leaveBtn.textContent = "Sair da sala";
   leaveBtn.addEventListener("click", async () => {
     if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
